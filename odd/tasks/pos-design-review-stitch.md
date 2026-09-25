@@ -42,7 +42,7 @@ User explicitly asked: verify/approve the impeccable proposal, adjust interactiv
 
 ## Tasks
 - [ ] T0 Exploration — IN PROGRESS: mapped all docs + prototype. Delegation attempted twice (`explore`), failed with transport error `OpenCode's free tier can only be used from within OpenCode` (task_ids ses_f2946df3affezTaO44bzCsBEyt, ses_f2946b332ffeofuo55e9T0NjTr); inline fallback used (documented route: inline).
-- [ ] T1 Tracking — THIS DOC: create feature doc + Engram mirror `odd/pos-design-review-stitch/tasks`; feature branch + commit.
+- [x] T1 Tracking — feature doc created on branch `feat/pos-design-review-stitch` (commit b7b005e). Engram mirror `odd/pos-design-review-stitch/tasks` PENDING — mem_save rejected twice ("could not confirm Engram session registration"); local file is source of truth until mirror succeeds. Resync on next available write.
 - [ ] T2 DESIGN.md edits — tender model (6 values, single tender), grid-first happy path + feature toggle, on-screen ticket + share sheet (WhatsApp optional post-MVP), MVP-scoped PIN login, States & Feedback + motion/interactivity spec, palette per user answer. Route: inline (1 decision-heavy file).
 - [ ] T3 Stitch prompt update — align prompts with edited modules (grid default, tenders, success ticket, states).
 - [ ] T4 Google Stitch launch — create project, design system (or reuse), generate screens from updated prompts, inspect.
