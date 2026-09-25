@@ -37,7 +37,7 @@ User explicitly asked: verify/approve the impeccable proposal, adjust interactiv
 ## Applicable checks
 - Read-back of edited DESIGN.md sections (gate) — PASSED (337 lines).
 - Cross-check each edit against ARCHITECTURE/DATABASE/SPRINTS statements (gate) — PASSED.
-- `impeccable detect` / `impeccable` context directive if required by the skill (`MANUAL_DETECTOR_REQUIRED`) — pending (depend on detector availability).
+- `impeccable detect` / `impeccable` context directive if required by the skill (`MANUAL_DETECTOR_REQUIRED`) — RUN 2026-09-24 via `impeccable.cmd detect DESIGN.md` (exit 0, no findings; binary lives at `C:\Users\user\.config\opencode\skills\impeccable\scripts\`).
 - Stitch screen inspection after generation — PASSED (canvas verified, screens exist with download URLs).
 
 ## Tasks
@@ -52,7 +52,7 @@ User explicitly asked: verify/approve the impeccable proposal, adjust interactiv
   - 4cf6a6b48b574333863259db163a402c "Dashboard Administrativo de KPIs" (generated in dual-view, retrievable) — NOT on canvas; regenerated individual: cd2c4312f18d4a79b91da8b181cbe52d (session 10304821578548291342)
   - 77db6b9a2e464b64a669a27528aa7c5d "Menú de Navegación - Bodega San Pedro" (generated in dual-view, retrievable) — NOT on canvas; regenerated individual: 2be1633275a04f57b16d96ddd1379afe "Menú de Navegación Lateral (Drawer) - POS" (session 348551149814137080)
   Screenshot download URLs available in stitch_get_screen responses (see session log). Canvas final state: 3 screens + design-system instance verified via stitch_get_project/stitch_list_screens.
-- [ ] T5 Close — final doc update (this file), work-unit commit, report verified outcome + pending/skipped checks; present Stitch suggestions to user (checkout modal/tender cards, Escáner view, Teclado view; Arqueo modal, Libro de Fiados, Admin PIN screen).
+- [x] T5 Close — feature doc updated (this file) + committed (c5be227). Engram mirror remains PENDING (3rd mem_save failure: "could not confirm Engram session registration"; local file is source of truth). Detector: impeccable detect clean. Final report to user sent (Stitch suggestions relayed).
 
 ## Progress
 - T0 ✅ inline fallback.
@@ -60,11 +60,11 @@ User explicitly asked: verify/approve the impeccable proposal, adjust interactiv
 - T2 ✅ DESIGN.md edits (commit 1b73313).
 - T3 ✅ Stitch prompt alignment (commit 1b73313).
 - T4 ✅ Stitch project + design system + 5 screens (canvas 3 + 2 retrievable).
-- T5 🔲 close + report in progress.
+- T5 ✅ close + report (this doc, commit c5be227; detector clean; suggestions presented).
 
 ## Decision log
 - 2026-09-24: Palette fork identified (light zinc vs dark tactical brief). **User chose LIGHT zinc + esmeralda**. Dark brief (`.impeccable/briefs/pos-cashier.md`) documented as rejected for this deliverable.
 - 2026-09-24: Design system roundness — requested ROUND_TWELVE at creation, Stitch stored ROUND_EIGHT (documented discrepancy, no rework decision yet).
 
 ## Next step
-T5: commit this feature-doc update (work-unit), then final report to user: verification outcome, DESIGN.md changes, Stitch project/design system/screens summary, and the Stitch suggestions awaiting user acceptance (checkout modal, Escáner, Teclado; plus Arqueo modal, Libro de Fiados, Admin PIN).
+Cycle closed (T0-T5). Optional follow-ups awaiting user: Accept any Stitch suggestion to regenerate (checkout modal, Escáner view, Teclado view, Arqueo modal, Libro de Fiados, Admin PIN), decide on ROUND_EIGHT vs ROUND_TWELVE stored discrepancy, update prototype_pos.html, retry Engram mirror once session registration recovers.
