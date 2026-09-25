@@ -267,41 +267,7 @@ Cuadrícula de 6 tarjetas táctiles de selección inmediata, alineada con la res
 
 ---
 
-## 6. Prompts Estructurados de Generación para Google Stitch
-
-Los siguientes prompts están optimizados para ser procesados directamente por la herramienta de generación visual **Google Stitch**:
-
-### Prompt Stitch 1: Cashier View (Products Grid, Scanner & Numpad)
-```text
-System: Google Stitch UI Engine v1.0
-Task: Generate a high-fidelity mobile Point of Sale (POS) Cashier View interface.
-Device: Smartphone viewport 390x844px.
-Design System: Shadcn UI minimalist light aesthetic, 60-30-10 color rule.
-Background (60%): Clean off-white/zinc-50 (#F4F4F5), pure white surface cards (#FFFFFF), crisp border-zinc-200.
-Secondary (30%): Zinc-100 components, soft grey segmented control tabs.
-Accent (10%): Vibrant Emerald Green (#10B981) for primary CTA buttons.
-Components to render:
-1. Header: Circular avatar with cashier initials 'MG', employee name 'María Gómez', shift 'Turno 8:00 am - 4:00 pm', green status badge 'En línea', wifi and settings icons.
-2. Segmented Control: 3 tabs ('Productos' active with grid icon, 'Escáner' with camera icon, 'Teclado' inactive).
-3. Products Grid (default happy path): 3-column tactile grid of favorite products with photo, name and price (e.g. Pan S/ 1.00, Huevos S/ 12.00, Leche S/ 5.50), each tile min 48px, one-tap add, quantity badges 'x2' on added tiles.
-4. Sticky Bottom Bar: White persistent card displaying 'Tickets (3 productos) - S/ 14.50' and a 52px full-width emerald green primary button 'COBRAR (S/ 14.50)' with thumb-friendly ergonomics.
-Typography: Inter font with JetBrains Mono for monetary digits in Peruvian Soles (S/).
-```
-
-### Prompt Stitch 2: Cashier Numpad Ergonomic Keypad
-```text
-System: Google Stitch UI Engine v1.0
-Task: Generate a mobile POS manual amount entry screen with 56px ergonomic numpad.
-Device: Smartphone viewport 390x844px.
-Style: Clean modern minimalist, light neutral palette, soft elevation shadows.
-Components:
-1. Display Card: Elevated white card displaying 'MONTO MANUAL' in uppercase zinc-400 and giant tabular amount 'S/ 12.00' in bold zinc-900.
-2. Keypad: 3x4 grid of 56px rounded buttons (rows 1-2-3, 4-5-6, 7-8-9, and 00-0-delete with rose red icon). Clean tactile depth with soft shadow and crisp border.
-3. Secondary Action: '+ Agregar al Ticket' full-width dark zinc button.
-4. Sticky Bottom Bar: Synced cart summary and full-width emerald green button 'COBRAR'.
-```
-
-## 6. Adaptación Web / Desktop (1280px – 1440px): Arquitectura Multi-panel y Ergonomía de Teclado
+## 6. Adaptación Web / Desktop (responsive): Arquitectura Multi-panel y Ergonomía de Teclado
 
 Siguiendo las directivas de **Impeccable** (`adapt.md`) y la filosofía de **Emil Kowalski**:
 > *"La adaptación no consiste en escalar píxeles, sino en repensar la experiencia para el nuevo contexto. En desktop, el espacio horizontal permite eliminar disclosure progresivo innecesario, exponer paneles concurrentes y acelerar la operación mediante atajos de teclado sin animaciones parásitas."*
@@ -343,16 +309,34 @@ En pantallas de escritorio o computadoras All-in-One de mostrador (`1280px` a `1
    - `Esc`: Cancelar / Cerrar modales o limpiar búsqueda.
    - `Supr`: Eliminar producto seleccionado del ticket.
 
-### 6.3 Prompt Stitch 5: Desktop Web App — Counter Cashier Station (1440x900px)
+### 6.3 Breakpoints Responsive y Comportamiento de Colapso (Web)
+
+La versión web **no es mobile escalado ni desktop fijo**: es un layout fluido con un único punto de quiebre estructural. El sistema de diseño 60-30-10 y los tokens (Inter, JetBrains Mono, zinc + esmeralda, radios 12/16/24) son idénticos en todos los anchos; solo cambia la disposición de paneles.
+
+| Breakpoint | Ancho | Disposición | Comportamiento de los 3 paneles |
+| :--- | :--- | :--- | :--- |
+| Desktop XL | ≥ 1280px | **3 columnas** (la §6.1) | Sidebar 240px fija + Catálogo flex-1 + Ticket 380–420px persistente. Es el caso de mostrador All-in-One. |
+| Laptop / Tablet horizontal | 1024–1279px | **3 columnas adaptadas** | Sidebar colapsa a iconos (64px) o se oculta tras hamburguesa; Catálogo gana espacio; Ticket baja a 340–360px. Los atajos F2–F4 siguen activos. |
+| Tablet vertical | 768–1023px | **2 paneles + ticket flotante** | Sidebar se convierte en **drawer** (gesto/hamburguesa, mismo componente del Módulo 3); Catálogo full-width; el **Ticket se vuelve sheet/bottom-drawer** accesible desde el botón `COBRAR` (F4) o un botón flotante de carrito. |
+| Mobile | < 768px | **1 columna** | Cae a la especificación móvil original (§§1–5, viewport 390px): sticky bottom bar, segmented Products/Escáner/Teclado, single-thumb. |
+
+Reglas de colapso obligatorias:
+1. **Ningún panel se estira arbitrariamente:** el Ticket tiene ancho máximo de 420px en desktop y nunca se expande a full-width salvo en tablet vertical (sheet) o mobile (sticky bottom bar).
+2. **Grilla de productos fluida:** mín. 2 columnas en mobile, 3–4 en tablet, 4–6 en desktop (tarjetas densas con hover); nunca una columna única en web.
+3. **Sidebar→drawer threshold:** en `1023px` y por debajo la sidebar persistente desaparece y su contenido vive en el drawer del Módulo 3, con los mismos enlaces y el bloque Admin (PIN) al final.
+4. **Atajos de teclado:** activos en ≥ 768px (cualquier dispositivo con teclado físico); en mobile siguen disponibles con teclado externo pero nunca son el único camino.
+5. **Modales de cobro:** en desktop abren como diálogo centrado (scale 0.95→1, bezier 0.16,1,0.3,1); en < 768px como bottom sheet (radios `rounded-3xl` superiores).
+
+### 6.4 Prompt Stitch 5: Desktop Web App — Counter Cashier Station (1440x900px)
 ```text
 System: Google Stitch UI Engine v1.0
 Task: Generate a high-fidelity desktop web application interface for POS counter station.
-Device: Desktop landscape viewport 1440x900px.
+Device: Desktop landscape viewport 1440x900px. This is the >=1280px branch of a responsive web layout (breakpoints per spec section 6.3); render the 3-column desktop arrangement.
 Design System: Shadcn UI clean light neutral, 60-30-10 color rule.
 Background (60%): Clean off-white surface-100 (#F4F4F5), pure white cards (#FFFFFF), crisp border-zinc-200.
 Secondary (30%): Zinc-100 components, subtle navigation sidebar and categories.
 Accent (10%): Vibrant Emerald Green (#10B981) for primary checkout CTA.
-Layout Architecture:
+Layout Architecture: 3 columns (Sidebar 240px + Catalog Flex-1 + Order Summary 380px) — do NOT render mobile bottom bars or segmented controls in this variant.
 1. Left Sidebar (240px): Store brand 'Bodega San Pedro', cashier profile 'María Gómez', shift '8:00 AM - 4:00 PM', online green badge, navigation links with clean Lucide icons (POS Mostrador [active], Caja, Fiados, Inventario, Reportes), bottom admin button with PIN badge.
 2. Center Catalog Workspace (Flex-1):
    - Top Bar: Search input with shortcut hint '[F2] Buscar producto o escanear código...', barcode scan status pill.
@@ -364,6 +348,26 @@ Layout Architecture:
    - Summary Box: Subtotal, IGV/Tax, and giant Total display 'TOTAL: S/ 42.50' in JetBrains Mono.
    - Quick Tender Buttons: Grid of 6 tenders ('Efectivo', 'Yape', 'Plin', 'Tarjeta', 'Otro', 'Fiado').
    - Bottom Primary Button: 52px high full-width Emerald Green button 'COBRAR [F4] — S/ 42.50' with subtle glow.
+Typography: Inter font with JetBrains Mono for tabular monetary figures (S/).
+```
+
+### 6.5 Prompt Stitch 6: Tablet Vertical Responsive Web — Cashier Station (768x1024px)
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate the tablet-vertical breakpoint (768x1024px) of the responsive POS web app.
+Device: Tablet portrait viewport 768x1024px. This is the 768-1023px branch of the responsive layout (spec section 6.3): sidebar has collapsed into a drawer, catalog is full-width, and the order ticket lives as a bottom sheet behind the COBRAR button.
+Design System: Shadcn UI clean light neutral, 60-30-10 color rule.
+Background (60%): Clean off-white/zinc-50 (#F4F4F5), pure white cards (#FFFFFF), crisp border-zinc-200.
+Secondary (30%): Zinc-100 components.
+Accent (10%): Vibrant Emerald Green (#10B981) for primary checkout CTA.
+Layout Architecture: 2 panels visible (top app bar + catalog); drawer and ticket are overlays, not columns. Do NOT render a persistent 3-column desktop layout.
+1. Top Bar: Store brand 'Bodega San Pedro', hamburger menu button (drawer trigger), cashier 'María Gómez' + shift '8:00 AM - 4:00 PM', online green badge, search icon.
+2. Catalog Workspace (full width, one column under the top bar):
+   - Search input with shortcut hint '[F2] Buscar producto o escanear código...', barcode scan status pill.
+   - Category Pills (horizontal scroll): 'Todos', 'Abarrotes', 'Lácteos', 'Bebidas', 'Limpieza', 'Granel / Panadería'.
+   - Product Grid: 3-column dense cards with thumbnail, name, unit price in bold JetBrains Mono 'S/ 4.80', stock indicator.
+3. Overlay Drawer (open state, right edge or left edge): navigation links (POS Mostrador [active], Caja, Fiados, Inventario, Reportes), bottom admin button with PIN badge.
+4. Floating Cart / COBRAR button (bottom-right): shows ticket item count '3' badge and label 'COBRAR [F4] — S/ 42.50' in Emerald Green; tapping opens the ticket bottom sheet (do not render the sheet content in this frame unless space allows; show a hint).
 Typography: Inter font with JetBrains Mono for tabular monetary figures (S/).
 ```
 
@@ -433,8 +437,9 @@ Dashboard: Top KPI cards (Net Daily Sales in Soles S/, Transaction count, Digita
 - [x] **Regla 60-30-10:** Verificada en fondos neutros (`zinc-50`), tarjetas secundarias (`zinc-100/200`) y acento esmeralda (`#10B981`).
 - [x] **Ergonomía Táctil:** Altura de teclas numéricas garantizada a 56px y botón `COBRAR` a 52px accesible con el pulgar.
 - [x] **Cobertura Modular:** 8 módulos integrales especificados y desacoplados.
-- [x] **Compatibilidad Google Stitch:** Prompts detallados y estructurados con especificaciones de viewport (Mobile 390px y Desktop 1440px) y tokens.
+- [x] **Compatibilidad Google Stitch:** Prompts detallados y estructurados con especificaciones de viewport (Mobile 390px, Tablet 768px y Desktop 1440px) y tokens.
 - [x] **Consistencia de Datos:** Montos en Soles peruanos (`S/`), alineados con los contratos de `DATABASE.md` (centavos enteros en backend y redondeo en cliente).
 - [x] **Conformidad con el scope MVP congelado:** Grilla de Productos como vista por defecto (cámara best-effort), ticket en pantalla + share sheet nativo (sin camino wa.me), acceso por PIN ligado al dispositivo y tender único con los 6 métodos de `DATABASE.md`.
 - [x] **Estados y Motion Spec:** Estados críticos (permiso denegado, cámara no disponible, código no encontrado, carrito vacío, sync pendiente, conflicto servidor/dispositivo, éxito de venta) y especificación de movimiento inclusivo (`prefers-reduced-motion`).
 - [x] **Adaptación Web Desktop (1280px–1440px):** Disposición de 3 columnas persistentes (Sidebar 240px, Catálogo flex-1, Ticket 380px), atajos de teclado F2–F4, y cero latencia de animación en acciones frecuentes (reglas Emil Kowalski).
+- [x] **Responsive Web explícito (§6.3):** Breakpoints definidos (≥1280px 3 columnas; 1024–1279 sidebar→iconos/ticket 340–360px; 768–1023 sidebar→drawer + ticket sheet; <768px cae a la spec móvil §§1–5), reglas de colapso obligatorias (ticket máx. 420px, grilla fluida mín. 2 cols, threshold drawer 1023px, atajos ≥768px, modales diálogo vs sheet), y prompts Stitch 5 (Desktop 1440) + 6 (Tablet 768) alineados con esos breakpoints.
