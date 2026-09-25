@@ -301,6 +301,108 @@ Components:
 4. Sticky Bottom Bar: Synced cart summary and full-width emerald green button 'COBRAR'.
 ```
 
+## 6. Adaptación Web / Desktop (1280px – 1440px): Arquitectura Multi-panel y Ergonomía de Teclado
+
+Siguiendo las directivas de **Impeccable** (`adapt.md`) y la filosofía de **Emil Kowalski**:
+> *"La adaptación no consiste en escalar píxeles, sino en repensar la experiencia para el nuevo contexto. En desktop, el espacio horizontal permite eliminar disclosure progresivo innecesario, exponer paneles concurrentes y acelerar la operación mediante atajos de teclado sin animaciones parásitas."*
+
+### 6.1 Disposición Espacial Multi-Panel (Three-Column Layout)
+En pantallas de escritorio o computadoras All-in-One de mostrador (`1280px` a `1440px+`), la interfaz pasa de navegación secuencial por pantallas a una distribución de tres columnas persistentes y concurrentes:
+
+```
+┌─────────────────┬──────────────────────────────────────────┬─────────────────────────────┐
+│ 1. SIDEBAR      │ 2. ZONA DE CATÁLOGO & BÚSQUEDA RÁPIDA    │ 3. PANEL DE ORDEN / TICKET  │
+│    (240px Fijo) │    (Flex-1 Central, Scroll Independiente)│    (380px–420px Persistente)│
+│                 │                                          │                             │
+│ • Local & Turno │ • Barra de Búsqueda Global (F2)          │ • Cabecera Ticket #2041     │
+│ • Menú Módulos: │ • Categorías / Filtros Rápidos           │ • Líneas del Carrito:       │
+│   - POS Mostrador│ • Grilla de Productos (Cards densas)     │   - Cantidad editable (F3)  │
+│   - Caja / Arqueo│ • Pestaña Escáner / Visor WebUSB/WebCam  │   - Precio y Subtotal unit. │
+│   - Fiados      │ • Teclado Numérico Flotante / Acceso     │ • Desglose:                 │
+│   - Inventario  │                                          │   - Subtotal S/             │
+│   - Mermas      │                                          │   - Descuentos              │
+│   - Reportes    │                                          │   - Total S/ en JetBrains   │
+│ • Conexión Sync │                                          │ • Selector Tender Rápido    │
+│ • Admin (PIN)   │                                          │ • Botón Gigante COBRAR (F4) │
+└─────────────────┴──────────────────────────────────────────┴─────────────────────────────┘
+```
+
+### 6.2 Ergonomía e Interacciones según Emil Kowalski (Desktop Craft)
+1. **Regla de Cero Animación en Acciones Frecuentes:**
+   - La escritura en la barra de búsqueda y el agregado de productos mediante ráfaga de escáner HID (< 40ms) o teclado **NO tienen animaciones de entrada ni retrasos**. Se ejecutan en 0ms.
+   - El refresco de totales del ticket no produce saltos de layout (*Layout Shift = 0*).
+2. **Micro-interacciones Táctiles y de Puntero:**
+   - Botones y tarjetas de producto usan `:active { transform: scale(0.98); }` con `transition: transform 120ms ease-out` (nunca `transition: all`).
+   - Hover states sutiles (`bg-zinc-50` / `border-zinc-300`) con `border` fijo para evitar parpadeos de tamaño.
+   - Diálogos y modales de cobro abren con `scale(0.95) -> scale(1)` y `opacity: 0 -> 1` con curva `cubic-bezier(0.16, 1, 0.3, 1)` (resorte amortiguado sin rebote molesto).
+3. **Mapeo de Atajos de Teclado Físico (Keyboard-First):**
+   - `F2` o `/`: Enfocar buscador de productos.
+   - `F3`: Modificar cantidad de la última línea agregada.
+   - `F4` o `Enter` (con carro no vacío): Abrir modal de cobro / Checkout.
+   - `1` a `6` en Checkout: Selección directa del Tender (`1` Efectivo, `2` Yape, `3` Plin, `4` Tarjeta, `5` Otro, `6` Fiado).
+   - `Esc`: Cancelar / Cerrar modales o limpiar búsqueda.
+   - `Supr`: Eliminar producto seleccionado del ticket.
+
+### 6.3 Prompt Stitch 5: Desktop Web App — Counter Cashier Station (1440x900px)
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate a high-fidelity desktop web application interface for POS counter station.
+Device: Desktop landscape viewport 1440x900px.
+Design System: Shadcn UI clean light neutral, 60-30-10 color rule.
+Background (60%): Clean off-white surface-100 (#F4F4F5), pure white cards (#FFFFFF), crisp border-zinc-200.
+Secondary (30%): Zinc-100 components, subtle navigation sidebar and categories.
+Accent (10%): Vibrant Emerald Green (#10B981) for primary checkout CTA.
+Layout Architecture:
+1. Left Sidebar (240px): Store brand 'Bodega San Pedro', cashier profile 'María Gómez', shift '8:00 AM - 4:00 PM', online green badge, navigation links with clean Lucide icons (POS Mostrador [active], Caja, Fiados, Inventario, Reportes), bottom admin button with PIN badge.
+2. Center Catalog Workspace (Flex-1):
+   - Top Bar: Search input with shortcut hint '[F2] Buscar producto o escanear código...', barcode scan status pill.
+   - Category Pills: 'Todos', 'Abarrotes', 'Lácteos', 'Bebidas', 'Limpieza', 'Granel / Panadería'.
+   - Product Grid: 4-column responsive grid of dense product cards with crisp images/thumbnails, name, unit price in bold JetBrains Mono 'S/ 4.80', and stock indicator.
+3. Right Sticky Order Summary Panel (380px):
+   - Order Header: 'Ticket #2041' with time and item count.
+   - Line Items Table: Scrollable list of cart items with quantity steppers (- / +), item name, unit price, and subtotal.
+   - Summary Box: Subtotal, IGV/Tax, and giant Total display 'TOTAL: S/ 42.50' in JetBrains Mono.
+   - Quick Tender Buttons: Grid of 6 tenders ('Efectivo', 'Yape', 'Plin', 'Tarjeta', 'Otro', 'Fiado').
+   - Bottom Primary Button: 52px high full-width Emerald Green button 'COBRAR [F4] — S/ 42.50' with subtle glow.
+Typography: Inter font with JetBrains Mono for tabular monetary figures (S/).
+```
+
+---
+
+## 7. Prompts Estructurados de Generación para Google Stitch
+
+Los siguientes prompts están optimizados para ser procesados directamente por la herramienta de generación visual **Google Stitch**:
+
+### Prompt Stitch 1: Cashier View (Products Grid Happy Path & Tabs)
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate a high-fidelity mobile Point of Sale (POS) Cashier View interface.
+Device: Smartphone viewport 390x844px.
+Design System: Shadcn UI minimalist light aesthetic, 60-30-10 color rule.
+Background (60%): Clean off-white/zinc-50 (#F4F4F5), pure white surface cards (#FFFFFF), crisp border-zinc-200.
+Secondary (30%): Zinc-100 components, soft grey segmented control tabs.
+Accent (10%): Vibrant Emerald Green (#10B981) for primary CTA buttons.
+Components to render:
+1. Header: Circular avatar with cashier initials 'MG', employee name 'María Gómez', shift 'Turno 8:00 am - 4:00 pm', green status badge 'En línea', wifi and settings icons.
+2. Segmented Control: 3 tabs ('Productos' [active/happy-path], 'Escáner' [best-effort], 'Teclado').
+3. Products Grid Viewport: 2-column grid of favorite/quick-add cards (large photo/icon, bold product name, price in soles S/ 0.00, hit targets ≥ 48px), plus quick-add favorite chips for bakery and bulk items below.
+4. Sticky Bottom Bar: White persistent card displaying 'Tickets (3 productos) - S/ 14.50' and a 52px full-width emerald green primary button 'COBRAR (S/ 14.50)' with thumb-friendly ergonomics.
+Typography: Inter font with JetBrains Mono for monetary digits in Peruvian Soles (S/).
+```
+
+### Prompt Stitch 2: Cashier Numpad Ergonomic Keypad
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate a mobile POS manual amount entry screen with 56px ergonomic numpad.
+Device: Smartphone viewport 390x844px.
+Style: Clean modern minimalist, light neutral palette, soft elevation shadows.
+Components:
+1. Display Card: Elevated white card displaying 'MONTO MANUAL' in uppercase zinc-400 and giant tabular amount 'S/ 12.00' in bold zinc-900.
+2. Keypad: 3x4 grid of 56px rounded buttons (rows 1-2-3, 4-5-6, 7-8-9, and 00-0-delete with rose red icon). Clean tactile depth with soft shadow and crisp border.
+3. Secondary Action: '+ Agregar al Ticket' full-width dark zinc button.
+4. Sticky Bottom Bar: Synced cart summary and full-width emerald green button 'COBRAR'.
+```
+
 ### Prompt Stitch 3: Checkout Modal & Instant Change Return
 ```text
 System: Google Stitch UI Engine v1.0
@@ -326,12 +428,13 @@ Dashboard: Top KPI cards (Net Daily Sales in Soles S/, Transaction count, Digita
 
 ---
 
-## 7. Verificación y Criterios de Aceptación del Diseño
+## 8. Verificación y Criterios de Aceptación del Diseño
 
 - [x] **Regla 60-30-10:** Verificada en fondos neutros (`zinc-50`), tarjetas secundarias (`zinc-100/200`) y acento esmeralda (`#10B981`).
 - [x] **Ergonomía Táctil:** Altura de teclas numéricas garantizada a 56px y botón `COBRAR` a 52px accesible con el pulgar.
 - [x] **Cobertura Modular:** 8 módulos integrales especificados y desacoplados.
-- [x] **Compatibilidad Google Stitch:** Prompts detallados y estructurados con especificaciones de viewport y tokens.
+- [x] **Compatibilidad Google Stitch:** Prompts detallados y estructurados con especificaciones de viewport (Mobile 390px y Desktop 1440px) y tokens.
 - [x] **Consistencia de Datos:** Montos en Soles peruanos (`S/`), alineados con los contratos de `DATABASE.md` (centavos enteros en backend y redondeo en cliente).
 - [x] **Conformidad con el scope MVP congelado:** Grilla de Productos como vista por defecto (cámara best-effort), ticket en pantalla + share sheet nativo (sin camino wa.me), acceso por PIN ligado al dispositivo y tender único con los 6 métodos de `DATABASE.md`.
 - [x] **Estados y Motion Spec:** Estados críticos (permiso denegado, cámara no disponible, código no encontrado, carrito vacío, sync pendiente, conflicto servidor/dispositivo, éxito de venta) y especificación de movimiento inclusivo (`prefers-reduced-motion`).
+- [x] **Adaptación Web Desktop (1280px–1440px):** Disposición de 3 columnas persistentes (Sidebar 240px, Catálogo flex-1, Ticket 380px), atajos de teclado F2–F4, y cero latencia de animación en acciones frecuentes (reglas Emil Kowalski).
