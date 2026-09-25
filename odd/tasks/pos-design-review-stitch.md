@@ -31,8 +31,8 @@ User explicitly asked: verify/approve the impeccable proposal, adjust interactiv
 1. DESIGN.md modules 0-2 and the tickets/checkout flow are consistent with the frozen contracts (grid-first default, no wa.me primary, PIN device login, six tenders). ✅
 2. New "States & Feedback / Motion" section covers the missing states and interaction specs above. ✅ (Section 5 Estados y Motion Spec, 7 states + inclusive motion)
 3. Stitch prompts in DESIGN.md are coherent with the edited modules. ✅ (Prompts 1 & 3 updated, sections renumbered 5/6/7)
-4. Google Stitch project created with the design system tokens; screens generated and inspected. ✅ (project + design system + 5 screens; canvas has 3, Drawer/Dashboard retrievable by ID)
-5. Feature document updated through the cycle; work-unit commits on feature branch with conventional messages. 🔲 T5 pending (final commit + report).
+4. Google Stitch project created with the design system tokens; screens generated and inspected. ✅ (project + design system + 14 screens; canvas 10 screens + design-system instance verified; last 4 T6 retrievable by ID — canvas attach is async, do not treat as failure)
+5. Feature document updated through the cycle; work-unit commits on feature branch with conventional messages. ✅ (T0-T6 closed, commits on feat/pos-design-review-stitch)
 
 ## Applicable checks
 - Read-back of edited DESIGN.md sections (gate) — PASSED (337 lines).
@@ -53,6 +53,15 @@ User explicitly asked: verify/approve the impeccable proposal, adjust interactiv
   - 77db6b9a2e464b64a669a27528aa7c5d "Menú de Navegación - Bodega San Pedro" (generated in dual-view, retrievable) — NOT on canvas; regenerated individual: 2be1633275a04f57b16d96ddd1379afe "Menú de Navegación Lateral (Drawer) - POS" (session 348551149814137080)
   Screenshot download URLs available in stitch_get_screen responses (see session log). Canvas final state: 3 screens + design-system instance verified via stitch_get_project/stitch_list_screens.
 - [x] T5 Close — feature doc updated (this file) + committed (c5be227). Engram mirror remains PENDING (3rd mem_save failure: "could not confirm Engram session registration"; local file is source of truth). Detector: impeccable detect clean. Final report to user sent (Stitch suggestions relayed).
+- [x] T6 Second generation batch (user-confirmed) — 7 screens generated sequentially with single-screen prompts (designSystem assets/17818953502401587827, project 1666859944796849703, MOBILE; all exist with screenshot+HTML download URLs):
+  - d84b9ae8a1cb45408574b0ed5cda169d "Módulo 0: Acceso y Login PIN - Bodega San Pedro" (session 1888620363808845314) — LOGIN declared in DESIGN.md Módulo 0 §0.1: empleado/cajero PIN 4 dígitos device-bound, online offline, sin dependencia de red; admin = contraseña maestra; selector cajero/turno post-MVP. **On canvas.**
+  - ff9e25776ea44762920e995eecee0e8d "Selector de Métodos de Pago - Tender Único" (session 2040399981529963019) — 6 tenders (EFECTIVO más usado, YAPE, PLIN, TARJETA, OTRO, FIADO con note feature-toggle), single tender per sale, CTA CONTINUAR CON {tender}. **On canvas.**
+  - 4067fff0148141f6867c96c43725bb3d "Punto de Venta - Escáner de Códigos" (session 18168936452132305655) — segmented Productos|Escáner|Teclado, camera viewport with emerald brackets + laser, permission-denied non-blocking toast, product result chip. **On canvas.**
+  - ed8b5c578b4d4ca684265e002a5d2789 "Punto de Venta - Teclado Numérico" (session 5558573949147872446) — montos manuales, display zinc-900 JetBrains Mono, keypad 3x4 (00-0-Borrar), + Agregar al Ticket, sticky COBRAR S/ 12.60. **Retrievable by ID.**
+  - 57cb88dc640d487e845e185915095fc4 "Cierre de Turno y Arqueo de Caja" (session 11552034057508568832) — conteo efectivo + quick chips S/ 10/20/50/100, banner cuadrado/faltante/sobrante, resumen ventas por tender, fiado informativo (no cuenta en caja), observaciones, CONFIRMAR CIERRE. **Retrievable by ID.**
+  - fb362f925e77472dabd6d28f20436dcb "Libro de Fiados - Bodega San Pedro" (session 5819424721861842786) — cartera S/ 640.00, chips Todos/Con deuda/Sobre límite, cards cliente con límite + barra, badge Sobre límite rose, abonos, Registrar Nuevo Deudor, note share-sheet (no wa.me). **Retrievable by ID.**
+  - f8ac3da956874ec986da3bd2a45bc89a "Acceso Administrador - PIN Maestro" (session 368692600529412875) — full-screen overlay, PIN 4 dots JetBrains Mono, 3x4 keypad, error inline 'PIN incorrecto — Intento 1 de 3', caminho empleado PIN, footer onboarding Módulo 0.2. **Retrievable by ID.**
+  Canvas verified via stitch_get_project: 10 screens + design-system instance; last 4 T6 screens retrievable by ID (canvas attach async — recheck later if needed). Note: earlier assumption 'canvas keeps only first 3' was wrong — 4cf6a6b4/77db6b9a/2be16332/cd2c4312 all attached eventually (async cascade).
 
 ## Progress
 - T0 ✅ inline fallback.
@@ -61,10 +70,12 @@ User explicitly asked: verify/approve the impeccable proposal, adjust interactiv
 - T3 ✅ Stitch prompt alignment (commit 1b73313).
 - T4 ✅ Stitch project + design system + 5 screens (canvas 3 + 2 retrievable).
 - T5 ✅ close + report (this doc, commit c5be227; detector clean; suggestions presented).
+- T6 ✅ second batch: 7 screens generated (Login, Tender, Escáner, Teclado, Arqueo, Fiados, Admin PIN) — 3 on canvas, 4 retrievable by ID.
 
 ## Decision log
 - 2026-09-24: Palette fork identified (light zinc vs dark tactical brief). **User chose LIGHT zinc + esmeralda**. Dark brief (`.impeccable/briefs/pos-cashier.md`) documented as rejected for this deliverable.
 - 2026-09-24: Design system roundness — requested ROUND_TWELVE at creation, Stitch stored ROUND_EIGHT (documented discrepancy, no rework decision yet).
+- 2026-09-25: Canvas attach is ASYNC — screens generated in the second batch attached progressively; verify via stitch_get_project at the end, never mid-batch.
 
 ## Next step
-Cycle closed (T0-T5). Optional follow-ups awaiting user: Accept any Stitch suggestion to regenerate (checkout modal, Escáner view, Teclado view, Arqueo modal, Libro de Fiados, Admin PIN), decide on ROUND_EIGHT vs ROUND_TWELVE stored discrepancy, update prototype_pos.html, retry Engram mirror once session registration recovers.
+T6 done. Final user report: (1) LOGIN IS declared in DESIGN.md Módulo 0 §0.1; (2) 7 new screens listed; (3) gap analysis — remaining screens/sections for a complete flow are DESIGN-doc-level, not Stitch-blockers: Módulo 0.2 onboarding (K-Means brand extractor), inventarios/stock, mermas, asistencia/turnos (all post-MVP in SPRINTS), per-client fiado state, admin dashboard detail; only confirmed next action is the final commit.
