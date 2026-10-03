@@ -45,6 +45,7 @@ El diseño se encuentra estandarizado e inspeccionado a partir de los dos proyec
 - **Modal Checkout:** `MultimethodCheckoutModal` (6 tenders de `DATABASE.md`: Efectivo, Yape, Plin, Tarjeta, Otro, Fiado; billetes rápidos y display gigante de vuelto).
 - **Admin Suite — Login-1 (selector de rol, desktop):** `RoleSelectorScreen` (AuthCard centrada con wordmark 'POS SaaS' y dos tarjetas de rol `RoleCard` — Empleado/Administrador — con íconos Lucide y hint de teclado caption-xs; ConnectivityBadge en esquina; sin datos de tenant pre-auth).
 - **Admin Suite — Login-2 (credencial, desktop):** `AdminCredentialForm` (variante Admin: back affordance + 'Teléfono' + 'Contraseña maestra' + botón 'INGRESAR' 52px accent-primary; binds `POST /auth/admin-login`) y `PinCredentialPanel` (variante Empleado: display de 4 puntos + reuso del `ErgonomicNumpad` 3x4 56px existente, :41, adaptado a PIN).
+- **Admin Suite — Shell (chrome Admin, desktop):** `Sidebar240` (brand block logo + tenant + versión, nav de 6 destinos ≥48px con íconos Lucide, ConnectivityBadge + contador de sync), `RoleBadge` 'Administrador', footer de sesión (teléfono + logout client-side — sin endpoint de logout, ARCHITECTURE.md:122-135).
 
 ---
 

@@ -116,4 +116,5 @@ T3 resuelto (password maestra por tenant). Login en 2 pantallas definido como re
 | WU | Prompt / delta | Commit | Verificación anti-drift |
 |----|----------------|--------|--------------------------|
 | 1 | P1 Login-1 + scaffold §7.1 + FRONTEND mapping (conteo 30 + Login-1) | `76ec23d` | Banned-token scan limpio en bloque P1 (hits solo en contenido pre-existente :53/:149/:289/:348); refs del footer resuelven contra docs vivos |
-| 2 | P2 Login-2 + badge-card §2.1 (D6) + DATABASE tenants `master_password_hash` (D1) + ARCHITECTURE `/auth/admin-login` + role claim (D2/D3) + FRONTEND Login-2 | (pendiente) | (pendiente) |
+| 2 | P2 Login-2 + badge-card §2.1 (D6) + DATABASE tenants `master_password_hash` (D1) + ARCHITECTURE `/auth/admin-login` + role claim (D2/D3) + FRONTEND Login-2 | `0a51866` | badge-card en §2.1 + Block T; 'Correo' ausente como label de campo (phone pinned D9); nota D1 verbatim §12; fila endpoint en ARCHITECTURE.md:126; refs del footer resuelven |
+| 3 | P3 Shell + acceso Admin + FRONTEND chrome Admin | (pendiente) | (pendiente) |
