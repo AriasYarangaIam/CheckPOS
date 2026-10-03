@@ -36,11 +36,11 @@ Fuera de alcance: migrar el POS website de Stitch a Figma; mobile/responsive.
 - [x] **T1** SDD preflight + init guard + resolución de store (Engram)
 - [x] **T2** `sdd-explore` — auditoría de cobertura Admin y drift
 - [x] **T3** Decidir modelo de autorización Admin — RESUELTO 2026-10-03: **password maestra por tenant** (decisión explícita del usuario). Login en **2 pantallas** (requerimiento del usuario; ver Notas).
-- [ ] **T4** `sdd-propose` para `stitch-admin-prompts`
-- [ ] **T5** `sdd-spec` — contratos de datos y requisitos por pantalla
-- [ ] **T6** `sdd-design` — arquitectura de prompts
-- [ ] **T7** `sdd-tasks` — breakdown
-- [ ] **T8** Emitir los 6-7 prompts finales
+- [x] **T4** `sdd-propose` para `stitch-admin-prompts`
+- [x] **T5** `sdd-spec` — contratos de datos y requisitos por pantalla
+- [x] **T6** `sdd-design` — arquitectura de prompts
+- [x] **T7** `sdd-tasks` — breakdown
+- [x] **T8** Emitir los 8 prompts finales — 8 work-unit commits en `feat/stitch-admin-prompts` + verificación anti-drift estática (ver sección T8)
 
 ## Findings (sdd-explore)
 
@@ -59,7 +59,7 @@ Solo aparece en `DESIGN.md:221-231` y `FRONTEND.md` TASK 8.2. Sprints 0-7 (`SPRI
 - `IGV/Tax` y `Descuentos` sin columna en el schema (`DATABASE.md:311`) → `IGV (18% inc.)` sin respaldo
 - Diálogo de conflicto muerto por D8 (`DATABASE.md:790,806`) pero vivo en `DESIGN.md:255`; el follow-up #157 olvidó incluir DESIGN.md
 - `cash_closes` sin float inicial ni egresos (`DATABASE.md:431-439`); la fórmula de diferencia (`DATABASE.md:485`) no representa emergencia (`:196`)
-- Asistencia, listing de turnos y WebUSB son post-MVP (`SPRINTS.md:39,212`) pero ya aparecen en los prompts
+- Asistencia, listing de turnos y WebUSB son post-MVP (`SPRINTS.md:39` scope freeze, `:214` multi-cashier/shifts later epic — refs CORREGIDAS en la fase design; nunca `:212`, que es "USB/BT HID scanner mode") pero ya aparecen en los prompts
 - **No existe token de color `card`** en §2.1 (`:49-52`) aunque Tarjeta se pinta azul (`:417`)
 
 ### 4. Drift entre el prompt del usuario y docs/
@@ -122,4 +122,7 @@ T3 resuelto (password maestra por tenant). Login en 2 pantallas definido como re
 | 5 | P5 Cierre de caja + nota DATABASE D10 (deferred) + FRONTEND arqueo | `38783b4` | apertura/egresos solo como negación (ADC-3.1); enum 6 filas exacto; sample consistente con P4 (115 vs 120 = −5.00); solo POST /cash-closes; nota D10 en DATABASE.md:470 |
 | 6 | P6 Fiados + delta DATABASE `credit_limit_cents` ADOPTED (D4) + FRONTEND fiados | `21bb25e` | Sample consistente (25.00 = 40.00 − 15.00, calza con P4); WhatsApp/wa.me solo como negación (ADF-4.1); delta verbatim §12 (BIGINT NULL, sin índice, sin CHECK) en DATABASE.md:412 |
 | 7 | P7 Inventario y mermas + nota DATABASE D5 (deferred) + FRONTEND inventario | `915e15f` | camera/photo/evidence solo como negación (ADI-3.1); motivos exactos 3; umbrales semáforo flaggeados; sample doc-backed (pan/huevos/hielo) con 20→18; solo GET /products + POST /stock-adjustments; nota D5 en DATABASE.md:309-312 |
-| 8 | P8 Catálogo maestro + nota DATABASE D11 (deferred) + FRONTEND catálogo | (pendiente) | (pendiente) |
+| 8 | P8 Catálogo maestro + nota DATABASE D11 (deferred) + FRONTEND catálogo | `729aec2` | márgenes/cost solo como negación (ADCt-4.1) + footer; sample doc-backed (S/ 4.80 :344/:368) con precios/GTIN spec-fixed flaggeados; stocks = P7; solo GET/POST /products + PATCH + S2-3; nota D11 en DATABASE.md:279-282 |
+| 9 | Closeout: verificación suite-level + feature doc | (este commit) | Token scan (hexes = §2.1 + badge-card, sin #D97706, glow /30); banned tokens cero en suite; enum 6 tenders en P4/P5; INACTIVE declarado en 8/8 prompts; S/ 640.00 cero; consistencia cross-prompt (fiado 25.00 P4=P6; expected P5=P4; stocks P8=P7) |
+
+**Suite-level closeout (2026-10-03, verificación 9.1-9.9).** Runners `go test ./...` / `vitest` no existen aún en disco (SPRINTS.md:178) — la verificación de este cambio es el anti-drift estático (footer diff + token scan + banned-token grep + resolución de refs de línea), reportado por work unit en los mensajes de commit. Playwright TASK 9.2 (FRONTEND.md:157-158) cubre solo cajero F2/F4 y es FUTURO — la verificación por browser de las pantallas Admin queda diferida a cuando los runners aterricen (strict_tdd=true registrado, no fabricado). Anclas de sample data de la suite: 'María Gómez' (nunca Mariluz, DESIGN.md:126), 'Bodega San Pedro' (:340/:364), pan/huevos/hielo (:135), S/ 4.80 (:344/:368); refs de asistencia corregidas SPRINTS.md:39/:214 (nunca :212).
