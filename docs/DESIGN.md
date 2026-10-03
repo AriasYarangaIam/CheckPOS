@@ -625,6 +625,65 @@ Brand 'Bodega San Pedro' (doc-backed :340, :364). Admin identity: 'María Gómez
 Refs implemented: DESIGN.md:183-184 (drawer header + >=48px nav), :187-189 (drawer links: Cuentas y Fiados, Inventario/Stock Rápido, Mermas y Daños), :193 (Gestión de Caja y Arqueo), :201 (Cuentas y Fiados module), :210 (Inventario/Stock Rápido module), :221 (Dashboard/Auditoría), :235 (Catálogo Maestro), :254 (sync counter), :318 (240px sidebar), :340 (Bodega San Pedro + active pattern), :364 (Bodega San Pedro); FRONTEND.md:23 (keyboard-first), :54 (Lucide), :113 (sidebar 240px); DATABASE.md:175 (tenant.name feeds brand), :195 (users.phone), :206 (no display name — phone is the only user identity); ARCHITECTURE.md:23 (role claim gates the suite), :122-135 (HTTP surface — no logout endpoint exists); spec ADS-1..3, IDA-3; delta D3 (JWT role:"admin" gates; 'Ajustes de dispositivos' deferred — NOT in the six destinations). Spec-fixed items (flagged): RoleBadge label 'Administrador', welcome copy 'Selecciona un módulo para comenzar', sample phone '+51 987 654 321', sample version 'v1.0'.
 ```
 
+#### Prompt Admin 4 — Dashboard / Auditoría (P4)
+
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate a high-fidelity desktop web application interface for the POS admin dashboard (Dashboard / Auditoría) — KPI row, tender split, outstanding fiado, shift audit list, and peak-hours chart. Data sources: local IndexedDB sales ledger (F8 projection) + live GET /fiado-accounts + local cash-close history. NO report endpoint exists.
+
+Device: Desktop landscape viewport 1440x900px. This is the >=1280px branch of a responsive web layout (breakpoints per DESIGN.md §6.3 :316-318); do NOT render mobile bottom bars or segmented controls in this variant (:339).
+
+[1. Token contract — Block T verbatim (DESIGN.md §2.1 :37-53 + typography :55-66 + elevation :68-76 + badge-card D6)]
+Palette:
+| Token | Hex | Tailwind | Role |
+|---|---|---|---|
+| surface-bg | #F4F4F5 | bg-zinc-100 / bg-zinc-50 | 60% app background |
+| surface-card | #FFFFFF | bg-white | cards, displays, modal |
+| surface-subtle | #E4E4E7 | bg-zinc-200 | segmented controls, chips, dividers |
+| surface-border | #E4E4E7 / #D4D4D8 | border-zinc-200 | subtle borders |
+| text-primary | #18181B | text-zinc-900 | titles, main amounts |
+| text-secondary | #71717A | text-zinc-500 | subtitles, labels |
+| text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
+| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
+| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
+| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
+| badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
+| danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
+Typography: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; numeric/tabular = JetBrains Mono, ui-monospace, monospace with font-feature-settings "tnum" 1 (Layout Shift = 0).
+| Scale | Size | LH | Weight | Use |
+|---|---|---|---|---|
+| display-xl | 36px | 40px | 900 | giant change display (not used in admin) |
+| display-lg | 30px | 36px | 800 | numpad display (Login-2 PIN display area) |
+| heading-md | 20px | 28px | 700 | totals, modal titles |
+| body-md | 14px | 20px | 600 | buttons, product names |
+| body-sm | 12px | 16px | 500 | badges, connectivity, table cells |
+| caption-xs | 10px | 12px | 700 | uppercase labels (INGRESAR hints, section labels) |
+Elevation & radii: rounded-xl 12px (secondary buttons, keys); rounded-2xl 16px (cards, displays, modal); rounded-3xl 24px (bottom sheets — not used on admin desktop); shadow-xs 0 1px 2px rgba(0,0,0,0.05); shadow-keypad 0 2px 4px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06); shadow-emerald-glow 0 8px 24px -4px rgba(16,185,129,0.35).
+Design system: Shadcn UI clean light neutral, 60-30-10 (:13-16, :335). Connectivity badge: online = emerald (accent-primary family) 'En línea'; offline = amber badge-fiado 'Modo Offline - IndexedDB' (:127-129); pending-sync counter text 'X ventas por sincronizar' (:254).
+
+[2. Layout contract]
+Sidebar 240px fixed (:318, :340; FRONTEND.md:113) + content flex-1 (independent scroll). NO ticket panel on any admin screen (anti-drift R5). Content grid: KPI row = 4 columns; second row = fiado card + hours chart (2 columns); audit list card full-width. Dense admin cards (Shadcn Card). Money in JetBrains Mono tnum everywhere (:57). KPI row (:223-227): 'S/ Ventas Netas' card (:224 — value = F8 projection over today's local ledger, DATABASE.md:339), 'Ticket promedio' + transaction volume card (:225), 'Desglose por método de pago' card (:226) with full-width split bar — Efectivo emerald, Billeteras Digitales purple+sky (badge-yape :50, badge-plin :51), remainder neutral (Tarjeta/Otro/Fiado; badge-card :417 available where the Tarjeta share renders); labels ONLY for the two doc-named groups (Efectivo, Billeteras Digitales), six-tender enum intact (ADD-1.1); 'Deuda acumulada en fiados por cobrar' card (:227 — live GET /fiado-accounts, ARCHITECTURE.md:133; balance = SUM(movements), never stored :394). Audit list card (:228-229): one row per local close (one per business date per tenant, D10 :444) — closed_on, per-tender expected/counted, difference = counted_cents − expected_cents (:485) with sobrante (emerald) / faltante (danger-action :53) labels (:229); fiado difference INFORMATIONAL (D11 :455-456 — NEVER a shortage flag); summaries reflect the frozen expected projection (MD-8 :468), no live re-projection (:453). Hours-pico chart card (:231, MAY) bucketed by local ledger created_at hour (:316). NO attendance section (:230 — post-MVP; corrected refs SPRINTS.md:39, :214; no attendance table among the 14, ARCHITECTURE.md:143-149). NO report endpoint (OQ1 — local ledger + fiado-accounts only; future GET /sales or /dashboard/summary = delta D12 note). Interaction: zero-latency (:297-299); :active scale(0.98) 120ms ease-out (:301); hover bg-zinc-50/border-zinc-300 fixed border (:302); prefers-reduced-motion (:264); no free animations (:266).
+
+[3. Keyboard map]
+NONE active — declared explicitly: no search field, no modals on this screen; F2 no-op (:305); F3 (:306), F4 (:307), 1-6 (:308), Supr (:310) INACTIVE — station-scoped, declared not applicable.
+
+[4. Component inventory]
+Shadcn primitives: Card, Badge, Button (FRONTEND.md TASK 1.3 :81-83). Shared admin: Sidebar240, ConnectivityBadge (:127-129, :254), AdminCard, MoneyText (JetBrains Mono tnum :57), EmptyState. Module elements: KpiCard (TASK 8.2 :149-150), TenderSplitBar, FiadoKpiCard, AuditListCard, HoursChartCard (MAY). Nothing invented (anti-pill).
+
+[5. States]
+Zero-sales day (ADD-1.2: KPI cards S/ 0.00, split 0%, chart empty state 'Sin ventas registradas hoy' — spec-fixed; no broken/NaN UI). Offline fiado card (ADD-2.2: pending state, NO number — never stale/invented). No closes (ADD-3.2: 'Sin cierres registrados' + Cierre de caja entry point). Offline badge + pending-sync counter (:254). Attendance absent (ADD-4.2). Station states declared absent (:250-256).
+
+[6. Sample data]
+'Bodega San Pedro' (:340); cashier identity 'María Gómez' (:126). Today's tenders EXACT (internally consistent): Efectivo S/ 120.00, Yape S/ 60.00, Plin S/ 30.00, Tarjeta S/ 25.00, Otro S/ 5.00, Fiado S/ 40.00 → Ventas Netas S/ 280.00 (F8 sum :339); ticket promedio S/ 20.00 over 14 transacciones (280/14; sample count spec-fixed); split Efectivo 43% / Billeteras Digitales 32% (spec-fixed rounding; remainder neutral 25% — Tarjeta/Otro/Fiado); fiado outstanding S/ 25.00 (María Gómez: +S/ 40.00 charge −S/ 15.00 abono = 25.00 — consistent with P6); audit rows: 2 past closes — one sobrante +S/ 5.00, one faltante −S/ 10.00, fiado row informational (sample values spec-fixed, structure doc-bound :427-487); hours chart: 14 sales bucketed by hour (sample counts sum 14; spec-fixed).
+
+[7. Anti-drift footer]
+Refs implemented: DESIGN.md:221-231 (MÓDULO 6 Dashboard), :223-227 (KPI row), :228-229 (audit list), :230 (attendance — ABSENT, post-MVP), :231 (hours chart), :57 (JetBrains Mono tnum), :127-129 (connectivity badge), :254 (sync counter); FRONTEND.md:127-129 (TASK 5.3 — local ledger), :149-150 (TASK 8.2 — KPI dashboard); DATABASE.md:305 (sold_on), :310 (payment_method six-value enum), :316 (created_at client close time), :339 (F8 money formula), :394 (balance = SUM(movements), never stored), :427-487 (cash closes cluster), :444 (D10 — one close per business date), :455-456 (D11 — fiado difference informational), :468 (MD-8 — frozen expected projection), :485 (difference = counted − expected); ARCHITECTURE.md:133 (GET /fiado-accounts), :143-149 (14 tables — no attendance table); SPRINTS.md:35 (single-cashier MVP scope), :39 (multi-cashier NOT in MVP), :214 (multi-cashier/shifts later epic — CORRECTED refs, never :212); spec ADD-1..4; delta D12 (DEFERRED note: future GET /sales or GET /dashboard/summary + attendance table; dashboard renders local ledger + fiado-accounts only this version, ADD-4). Spec-fixed items (flagged): sample tender amounts, ticket promedio S/ 20.00 over 14 transacciones, split percentages 43%/32%, audit sample values (+S/ 5.00 / −S/ 10.00), chart bucket counts, empty-state copy 'Sin ventas registradas hoy' and 'Sin cierres registrados'.
+```
+
 ---
 
 ## 8. Verificación y Criterios de Aceptación del Diseño
