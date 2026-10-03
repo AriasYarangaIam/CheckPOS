@@ -743,6 +743,65 @@ Business date '2026-10-03'. Expected EXACT to P4: Efectivo S/ 120.00, Yape S/ 60
 Refs implemented: DESIGN.md:193-198 (MÓDULO 3.2 — Gestión de Caja y Arqueo), :194 (apertura — DEFERRED, not rendered), :196 (egresos — DEFERRED, not rendered), :197 (cierre de turno: cuadre comparativo), :229 (sobrante/faltante summary), :253 (disabled pattern), :301-303 (active/hover/modal), :349 (tender display names); FRONTEND.md:113 (sidebar 240px); DATABASE.md:310 (payment_method six-value enum), :339 (F8 expected projection), :427-487 (cash closes cluster), :431-439 (cash_closes columns — no float/egress), :444 (D10 — one close per business date), :455-456 (D11 — fiado informational), :466 (six-value enum on counts), :468 (MD-8 — frozen expected), :469 (counted_cents operator input), :477 (counts CHECK six values), :478 (F32 — counted fiado = 0 structural), :485 (difference = counted − expected), :737 (cash-closes queueable), :751 (F37 — duplicate-date close silent no-op); ARCHITECTURE.md:134 (POST /cash-closes — idempotency required); SPRINTS.md:120 (S4-1 — expected vs counted by tender); spec ADC-1..3; delta D10 (DEFERRED note: future cash_closes.opening_float_cents BIGINT NULL + egress handling; formula :485 unchanged this version; screen omits float/egress, ADC-3.1). Spec-fixed items (flagged): 'CERRAR CAJA' copy, empty state 'Sin ventas registradas', business date '2026-10-03', mismatch sample (Efectivo S/ 115.00 → faltante −S/ 5.00).
 ```
 
+#### Prompt Admin 6 — Fiados (P6)
+
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate a high-fidelity desktop web application interface for the POS admin fiados screen (Cuentas y Fiados) — deudor cartera with 2-click search, credit-limit warning, movement history, and abono (partial payment) registration with native share of the estado de cuenta.
+
+Device: Desktop landscape viewport 1440x900px. This is the >=1280px branch of a responsive web layout (breakpoints per DESIGN.md §6.3 :316-318); do NOT render mobile bottom bars or segmented controls in this variant (:339).
+
+[1. Token contract — Block T verbatim (DESIGN.md §2.1 :37-53 + typography :55-66 + elevation :68-76 + badge-card D6)]
+Palette:
+| Token | Hex | Tailwind | Role |
+|---|---|---|---|
+| surface-bg | #F4F4F5 | bg-zinc-100 / bg-zinc-50 | 60% app background |
+| surface-card | #FFFFFF | bg-white | cards, displays, modal |
+| surface-subtle | #E4E4E7 | bg-zinc-200 | segmented controls, chips, dividers |
+| surface-border | #E4E4E7 / #D4D4D8 | border-zinc-200 | subtle borders |
+| text-primary | #18181B | text-zinc-900 | titles, main amounts |
+| text-secondary | #71717A | text-zinc-500 | subtitles, labels |
+| text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
+| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
+| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
+| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
+| badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
+| danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
+Typography: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; numeric/tabular = JetBrains Mono, ui-monospace, monospace with font-feature-settings "tnum" 1 (Layout Shift = 0).
+| Scale | Size | LH | Weight | Use |
+|---|---|---|---|---|
+| display-xl | 36px | 40px | 900 | giant change display (not used in admin) |
+| display-lg | 30px | 36px | 800 | numpad display (Login-2 PIN display area) |
+| heading-md | 20px | 28px | 700 | totals, modal titles |
+| body-md | 14px | 20px | 600 | buttons, product names |
+| body-sm | 12px | 16px | 500 | badges, connectivity, table cells |
+| caption-xs | 10px | 12px | 700 | uppercase labels (INGRESAR hints, section labels) |
+Elevation & radii: rounded-xl 12px (secondary buttons, keys); rounded-2xl 16px (cards, displays, modal); rounded-3xl 24px (bottom sheets — not used on admin desktop); shadow-xs 0 1px 2px rgba(0,0,0,0.05); shadow-keypad 0 2px 4px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06); shadow-emerald-glow 0 8px 24px -4px rgba(16,185,129,0.35).
+Design system: Shadcn UI clean light neutral, 60-30-10 (:13-16, :335). Connectivity badge: online = emerald (accent-primary family) 'En línea'; offline = amber badge-fiado 'Modo Offline - IndexedDB' (:127-129); pending-sync counter text 'X ventas por sincronizar' (:254).
+
+[2. Layout contract]
+Sidebar 240px fixed (:318, :340; FRONTEND.md:113) + content flex-1 (independent scroll). NO ticket panel on any admin screen (anti-drift R5). Master-detail, two flex panes: LEFT pane = SearchBarF2 ('[F2]' hint :305, :342) + deudor cartera list (list ~min 320px — no invented absolute width, docs pin none; flagged); RIGHT pane = account detail (flex-1). Left list from GET /fiado-accounts (ARCHITECTURE.md:133): name (:382), phone optional (:383), computed balance in JetBrains Mono tnum (SUM of movements, never stored :394); warning badge-fiado when balance > credit_limit_cents (adopted delta D4; DESIGN.md:204, :49; ADF-2.1). Right pane detail: movement history (fiado_movements: signed amount_cents — charge positive, payment negative, sign IS the kind :407; note :410; sale linkage where present :415; running balance computed :394, no writable balance field); abono flow (:205): amount + tender (Efectivo / transferencia per :205) → POST /fiado-movements (negative amount; queueable :736; atomic account upsert F12 :760; ADF-3.1); share action → NATIVE share sheet with composed estado de cuenta (:206; client-side composition; NO wa.me/WABA — SPRINTS.md:153, S6-4; ADF-4.1). Abono (payment, negative) shown emerald; charge (positive) text-primary; money JetBrains Mono tnum; share = secondary button. Interaction: zero-latency (:297-299); :active scale(0.98) 120ms ease-out (:301); hover bg-zinc-50/border-zinc-300 fixed border (:302); prefers-reduced-motion (:264); no free animations (:266).
+
+[3. Keyboard map]
+F2 focuses search (:305); Esc clears search (:309); Enter opens the first match / submits the abono; Arrow keys navigate the list; F3 (:306), F4 (:307), 1-6 (:308), Supr (:310) INACTIVE — station-scoped, declared not applicable.
+
+[4. Component inventory]
+Shadcn primitives: Card, Input, Badge, Button (FRONTEND.md TASK 1.3 :81-83). Shared admin: Sidebar240, SearchBarF2 (DESIGN.md:342 hint pattern, :305, :309), ConnectivityBadge (:127-129, :254), AdminCard, MoneyText (:57), EmptyState. Module elements: DeudorListPane, MovementHistoryPane, AbonoForm, native share action (TASK 7.1 :142 — credit-limit warning anchor). Nothing invented (anti-pill).
+
+[5. States]
+No deudores ('Sin deudores registrados', 0.4-9). No-hits (ADF-1.2 — spec-fixed copy). Warning above limit (ADF-2.1 — badge-fiado on the row). No-limit / within limit (ADF-2.2 — NULL limit = no cap, no warning). Offline abono queues (ADF-3.2 — persists locally + queues; counter :254). Share native (ADF-4.1). Station states declared absent (:250-256).
+
+[6. Sample data]
+'María Gómez' (doc-backed :126) — the ONLY documented person (0.4-4; no second invented deudor): charge +S/ 40.00 (fiado sale, note 'Venta fiada'), abono −S/ 15.00 (note 'Abono efectivo') → balance S/ 25.00 (internally consistent: Σ movements = 40.00 − 15.00). Credit limit S/ 50.00 → NO warning (primary render). Warning alternate render: same account, limit S/ 20.00 → balance 25.00 > 20.00 → badge-fiado warning (same data, one changed limit).
+
+[7. Anti-drift footer]
+Refs implemented: DESIGN.md:201-206 (MÓDULO 4 — Cuentas y Fiados), :203 (registro deudor en 2 clics), :204 (límites de crédito), :205 (abonos parciales efectivo/transferencia), :206 (share nativo; WhatsApp post-MVP), :49 (badge-fiado), :305 (F2), :309 (Esc), :342 (search hint pattern); DATABASE.md:378-386 (fiado_accounts), :383 (phone optional), :394 (balance = SUM(movements), never stored), :407 (amount_cents sign IS the kind), :410 (note), :415 (sale linkage F19), :714 (cursor-pulled — balance limit change named), :722 (LWW damage bound — balance limit named), :736 (fiado-movements queueable), :760 (F12 — atomic account upsert); ARCHITECTURE.md:132-133 (POST /fiado-movements, GET /fiado-accounts), :155 (WhatsApp non-goal); SPRINTS.md:153 (S6-4 — no wa.me in MVP); spec ADF-1..4; ADOPTED delta credit_limit_cents (register D4, design §9a — UI waits for the contract, rule D4). Spec-fixed items (flagged): no-hits copy, abono form layout, sample movement notes ('Venta fiada', 'Abono efectivo'), sample limit values (S/ 50.00 / S/ 20.00), list min-width ~320px (docs pin no absolute width).
+```
+
 ---
 
 ## 8. Verificación y Criterios de Aceptación del Diseño

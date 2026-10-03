@@ -406,6 +406,18 @@ A customer who buys on credit (fiado). No writable balance column — the balanc
 **RLS**: tenant-scoped (Section 5).
 **Decision trace**: OI-2 (UUIDv7 client-generated); OI-8 (LWW comparator = client mutation-time updated_at; damage bound: name/phone only); binding rule "no writable balance" — balance = SUM(fiado_movements.amount_cents) stated as computed invariant.
 
+**Delta note — SDD stitch-admin-prompts (D4 ADOPTED, binds P6 Fiados; docs-only, NO DDL).** Documentación de columna futura para el backend, anclada a `fiado_accounts` (columnas :378-386). Contrato exacto según design §12 del cambio `stitch-admin-prompts`:
+
+```text
+fiado_accounts.credit_limit_cents BIGINT NULL     -- centavos enteros (2.3); NULL = sin tope; campo de perfil LWW-mutable
+                                                  --  (comparador updated_at; :722 ya nombra "balance limit" entre los LWW-mutables);
+                                                  --  cursor-pulled (:714 ya nombra "a fiado account's balance limit change");
+                                                  --  sin índice nuevo (el fiado_accounts_tenant_id_updated_at_idx :392 sirve al cursor);
+                                                  --  sin CHECK constraint (las columnas de monto no llevan ninguna)
+```
+
+La UI (P6) renderiza el warning de límite de crédito (DESIGN.md:204) solo cuando esta columna exista en el contrato — la UI espera el contrato, no lo inventa (regla D4).
+
 ### `fiado_movements` — Fiado (tenant-scoped/RLS)
 
 A single credit entry (charge or payment) against a fiado account. Append-only signed ledger — the sign of `amount_cents` IS the kind (charge positive, payment negative); no extra `kind` column. Voided fiado sale → sign-reversed compensating movement, never DELETE or edit.
