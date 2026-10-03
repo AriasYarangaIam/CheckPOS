@@ -684,6 +684,65 @@ Zero-sales day (ADD-1.2: KPI cards S/ 0.00, split 0%, chart empty state 'Sin ven
 Refs implemented: DESIGN.md:221-231 (MÓDULO 6 Dashboard), :223-227 (KPI row), :228-229 (audit list), :230 (attendance — ABSENT, post-MVP), :231 (hours chart), :57 (JetBrains Mono tnum), :127-129 (connectivity badge), :254 (sync counter); FRONTEND.md:127-129 (TASK 5.3 — local ledger), :149-150 (TASK 8.2 — KPI dashboard); DATABASE.md:305 (sold_on), :310 (payment_method six-value enum), :316 (created_at client close time), :339 (F8 money formula), :394 (balance = SUM(movements), never stored), :427-487 (cash closes cluster), :444 (D10 — one close per business date), :455-456 (D11 — fiado difference informational), :468 (MD-8 — frozen expected projection), :485 (difference = counted − expected); ARCHITECTURE.md:133 (GET /fiado-accounts), :143-149 (14 tables — no attendance table); SPRINTS.md:35 (single-cashier MVP scope), :39 (multi-cashier NOT in MVP), :214 (multi-cashier/shifts later epic — CORRECTED refs, never :212); spec ADD-1..4; delta D12 (DEFERRED note: future GET /sales or GET /dashboard/summary + attendance table; dashboard renders local ledger + fiado-accounts only this version, ADD-4). Spec-fixed items (flagged): sample tender amounts, ticket promedio S/ 20.00 over 14 transacciones, split percentages 43%/32%, audit sample values (+S/ 5.00 / −S/ 10.00), chart bucket counts, empty-state copy 'Sin ventas registradas hoy' and 'Sin cierres registrados'.
 ```
 
+#### Prompt Admin 5 — Cierre de caja y arqueo (P5)
+
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate a high-fidelity desktop web application interface for the POS admin cash-close screen (Cierre de caja y arqueo) — expected vs counted per tender, sobrante/faltante summary, and the close action. No opening-float input and no emergency-egress form on this screen (deferred delta D10).
+
+Device: Desktop landscape viewport 1440x900px. This is the >=1280px branch of a responsive web layout (breakpoints per DESIGN.md §6.3 :316-318); do NOT render mobile bottom bars or segmented controls in this variant (:339).
+
+[1. Token contract — Block T verbatim (DESIGN.md §2.1 :37-53 + typography :55-66 + elevation :68-76 + badge-card D6)]
+Palette:
+| Token | Hex | Tailwind | Role |
+|---|---|---|---|
+| surface-bg | #F4F4F5 | bg-zinc-100 / bg-zinc-50 | 60% app background |
+| surface-card | #FFFFFF | bg-white | cards, displays, modal |
+| surface-subtle | #E4E4E7 | bg-zinc-200 | segmented controls, chips, dividers |
+| surface-border | #E4E4E7 / #D4D4D8 | border-zinc-200 | subtle borders |
+| text-primary | #18181B | text-zinc-900 | titles, main amounts |
+| text-secondary | #71717A | text-zinc-500 | subtitles, labels |
+| text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
+| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
+| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
+| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
+| badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
+| danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
+Typography: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; numeric/tabular = JetBrains Mono, ui-monospace, monospace with font-feature-settings "tnum" 1 (Layout Shift = 0).
+| Scale | Size | LH | Weight | Use |
+|---|---|---|---|---|
+| display-xl | 36px | 40px | 900 | giant change display (not used in admin) |
+| display-lg | 30px | 36px | 800 | numpad display (Login-2 PIN display area) |
+| heading-md | 20px | 28px | 700 | totals, modal titles |
+| body-md | 14px | 20px | 600 | buttons, product names |
+| body-sm | 12px | 16px | 500 | badges, connectivity, table cells |
+| caption-xs | 10px | 12px | 700 | uppercase labels (INGRESAR hints, section labels) |
+Elevation & radii: rounded-xl 12px (secondary buttons, keys); rounded-2xl 16px (cards, displays, modal); rounded-3xl 24px (bottom sheets — not used on admin desktop); shadow-xs 0 1px 2px rgba(0,0,0,0.05); shadow-keypad 0 2px 4px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06); shadow-emerald-glow 0 8px 24px -4px rgba(16,185,129,0.35).
+Design system: Shadcn UI clean light neutral, 60-30-10 (:13-16, :335). Connectivity badge: online = emerald (accent-primary family) 'En línea'; offline = amber badge-fiado 'Modo Offline - IndexedDB' (:127-129); pending-sync counter text 'X ventas por sincronizar' (:254).
+
+[2. Layout contract]
+Sidebar 240px fixed (:318, :340; FRONTEND.md:113) + content flex-1 (independent scroll). NO ticket panel on any admin screen (anti-drift R5). Dense admin close card: header (business date), SIX tender rows, summary row, submit button. Tender rows (:349 display names; enum EXACT DATABASE.md:310/:466/:477): Efectivo / Yape / Plin / Tarjeta / Otro rows = expected (frozen ledger projection — F8 per-method SUM over sold_on = closed_on, :339, MD-8 :468; read-only, JetBrains Mono tnum) + counted (operator money input, integer cents :469, S/ prefix) + difference = counted − expected (:485) visible (sobrante emerald / faltante danger-action :53); Fiado row = expected only (credit extended, D11 :455-456), counted LOCKED 0 (F32 structural :478), informational note with badge-fiado (:49) — NEVER a shortage flag. Summary line totals sobrante/faltante across cash-like tenders (:229). Close action: 52px accent-primary button 'CERRAR CAJA' (spec-fixed copy; uppercase CTA style :150-174) → POST /cash-closes (ARCHITECTURE.md:134; idempotency REQUIRED; queueable DATABASE.md:737). If a close exists locally → form renders READ-ONLY with the recorded counts (S4-3; ADC-2.1/2.2; duplicate-date close = silent no-op F37 :751, no error surfaced). NO opening-float input (apertura :194), NO egress form (:196) — deferred (ADC-3.1; no columns :431-439; formula :485 has no egress term; delta D10 note). Tender identity badges: badge-yape (:50), badge-plin (:51), badge-card (Tarjeta, :417), badge-other (:52), badge-fiado (:49). Interaction: zero-latency (:297-299); :active scale(0.98) 120ms ease-out (:301); hover bg-zinc-50/border-zinc-300 fixed border (:302); disabled = opacity 40%, no glow (:253); prefers-reduced-motion (:264).
+
+[3. Keyboard map]
+Digits enter counted amounts; Enter submits; Esc clears the focused counted input (no modal on this screen — no-op otherwise, :309); F2 no-op (:305 — no search field); F3 (:306), F4 (:307), 1-6 (:308), Supr (:310) INACTIVE — station-scoped, declared not applicable.
+
+[4. Component inventory]
+Shadcn primitives: Card, Input, Badge, Button (FRONTEND.md TASK 1.3 :81-83). Shared admin: Sidebar240, ConnectivityBadge (:127-129, :254), AdminCard (close card), MoneyText (JetBrains Mono tnum :57), EmptyState. Tender identity badges: badge-yape, badge-plin, badge-card, badge-other, badge-fiado (§2.1 + badge-card D6). Nothing invented (anti-pill).
+
+[5. States]
+Empty day (ADC-1.3: every row expected 0, empty state 'Sin ventas registradas' — spec-fixed; close action STILL available — a zero close is valid). Read-only close-exists (ADC-2.1/2.2: recorded counts shown, no edits). Offline queues (ADC-2.3: close persists locally and queues; pending counter :254). Mismatch sobrante/faltante (ADC-1.2). Fiado informational (D11 — never a shortage flag). No float/egress UI (ADC-3.1). Station states declared absent (:250-256).
+
+[6. Sample data]
+Business date '2026-10-03'. Expected EXACT to P4: Efectivo S/ 120.00, Yape S/ 60.00, Plin S/ 30.00, Tarjeta S/ 25.00, Otro S/ 5.00, Fiado S/ 40.00. Happy path: counted = expected (differences 0; fiado row informational — expected 40.00, counted 0 locked, F32 :478). Mismatch alternate render: Efectivo counted S/ 115.00 → faltante −S/ 5.00; summary consistent (sobrante S/ 0.00 / faltante S/ 5.00 across cash-like tenders).
+
+[7. Anti-drift footer]
+Refs implemented: DESIGN.md:193-198 (MÓDULO 3.2 — Gestión de Caja y Arqueo), :194 (apertura — DEFERRED, not rendered), :196 (egresos — DEFERRED, not rendered), :197 (cierre de turno: cuadre comparativo), :229 (sobrante/faltante summary), :253 (disabled pattern), :301-303 (active/hover/modal), :349 (tender display names); FRONTEND.md:113 (sidebar 240px); DATABASE.md:310 (payment_method six-value enum), :339 (F8 expected projection), :427-487 (cash closes cluster), :431-439 (cash_closes columns — no float/egress), :444 (D10 — one close per business date), :455-456 (D11 — fiado informational), :466 (six-value enum on counts), :468 (MD-8 — frozen expected), :469 (counted_cents operator input), :477 (counts CHECK six values), :478 (F32 — counted fiado = 0 structural), :485 (difference = counted − expected), :737 (cash-closes queueable), :751 (F37 — duplicate-date close silent no-op); ARCHITECTURE.md:134 (POST /cash-closes — idempotency required); SPRINTS.md:120 (S4-1 — expected vs counted by tender); spec ADC-1..3; delta D10 (DEFERRED note: future cash_closes.opening_float_cents BIGINT NULL + egress handling; formula :485 unchanged this version; screen omits float/egress, ADC-3.1). Spec-fixed items (flagged): 'CERRAR CAJA' copy, empty state 'Sin ventas registradas', business date '2026-10-03', mismatch sample (Efectivo S/ 115.00 → faltante −S/ 5.00).
+```
+
 ---
 
 ## 8. Verificación y Criterios de Aceptación del Diseño

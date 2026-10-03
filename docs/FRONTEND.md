@@ -47,6 +47,7 @@ El diseño se encuentra estandarizado e inspeccionado a partir de los dos proyec
 - **Admin Suite — Login-2 (credencial, desktop):** `AdminCredentialForm` (variante Admin: back affordance + 'Teléfono' + 'Contraseña maestra' + botón 'INGRESAR' 52px accent-primary; binds `POST /auth/admin-login`) y `PinCredentialPanel` (variante Empleado: display de 4 puntos + reuso del `ErgonomicNumpad` 3x4 56px existente, :41, adaptado a PIN).
 - **Admin Suite — Shell (chrome Admin, desktop):** `Sidebar240` (brand block logo + tenant + versión, nav de 6 destinos ≥48px con íconos Lucide, ConnectivityBadge + contador de sync), `RoleBadge` 'Administrador', footer de sesión (teléfono + logout client-side — sin endpoint de logout, ARCHITECTURE.md:122-135).
 - **Admin Suite — Dashboard (KPIs, desktop):** `KpiCardRow` (Ventas Netas, Ticket promedio, Desglose por tender, Fiados por cobrar — TASK 8.2 :149-150), `TenderSplitBar` (Efectivo vs Billeteras Digitales, enum de 6 tenders), `FiadoKpiCard` (pendiente offline, sin número), `AuditListCard` (cierres locales con sobrante/faltante — fiado informacional), `HoursChartCard` (MAY, buckets por hora local).
+- **Admin Suite — Cierre de caja (arqueo, desktop):** `CashCloseCard` (6 filas tender expected/counted/difference — enum EXACTO a DATABASE.md:310/:466/:477; fila fiado informacional con counted locked 0, F32 :478; resumen sobrante/faltante), CTA `CERRAR CAJA` 52px accent-primary (POST /cash-closes; form read-only si ya existe cierre local — F37 :751).
 
 ---
 

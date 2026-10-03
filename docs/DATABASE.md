@@ -467,6 +467,8 @@ One close per business date per tenant (D10). Header row carrying the close meta
 
 **Decision trace**: OI-2 (UUIDv7 client-generated); D10 (UNIQUE (tenant_id, closed_on) — one close per business date per tenant; repeat closes deferred); D11 (close-report reading: expected fiado = credit extended, counted fiado = 0, difference informational); F8 (expected-projection formula); F37 (queued duplicate-date close → silent no-op; pointer to Section 7).
 
+**Delta note — SDD stitch-admin-prompts (D10 DEFERRED; docs-only, NO DDL).** La pantalla de cierre (P5) omite fondo inicial y egresos de emergencia (ADC-3.1): `cash_closes` no tiene columnas de float/egresos (:431-439) y la fórmula `difference = counted_cents − expected_cents` (:485) no tiene término de egreso — un delta no trivial que alteraría la semántica de F8 (:339) y la forma D10. Delta futuro registrado: `cash_closes.opening_float_cents BIGINT NULL` + manejo de egresos. La fórmula :485 queda sin cambios en esta versión; la pantalla liga solo al contrato que existe (expected vs counted, S4-1 SPRINTS.md:120).
+
 ### `cash_close_counts` — Cash close (tenant-scoped/RLS)
 
 One row per payment method per close. Carries both the frozen expected amount (ledger projection at close time) and the operator's counted amount. Append-only. No second running counter anywhere (S4-1).
