@@ -276,6 +276,16 @@ A sellable item in one tenant's catalog. Carries its own identity, price, stock 
 **Decision trace**: decision 2 (JSONB boundary — attributes is home #1); decision 8 (LWW = client mutation-time); OI-7 (tombstones); OI-10 (no stock >= 0 CHECK); OI-11 (RESTRICT FK on products referenced by sale_lines); F13 (adoption rule); MD-11 (stock/updated_at interaction).
 **Adoption rule (F13)**: when a tenant adopts a global product, the server copies the global row's data into the tenant's columns (name, gtin, uom, attributes) at adoption time and sets global_product_id. After adoption the tenant row is self-owned — edits to the tenant row do not propagate back to the global row, and edits to the global row do not propagate to adopted tenant rows. The pointer is lineage, never a live dependency.
 
+**Delta note — SDD stitch-admin-prompts (D11 DEFERRED; docs-only, NO DDL).** La pantalla de catálogo (P8) NO renderiza columna de márgenes ni alertas de costo (ADCt-4.1): `products` no tiene `cost_cents` (:234-249) y "net profit"/compras son epics Later (SPRINTS.md:215; fuera de esta versión, §9 :825). Delta futuro registrado:
+
+```text
+products.cost_cents BIGINT NULL     -- + campo PATCH aditivo + cálculo de margen comercial;
+                                    --  la gestión de precio (price_cents) SÍ está en scope (ADCt-2.3);
+                                    --  purchases/suppliers y net profit: Later epics (SPRINTS.md:215, :825)
+```
+
+La gestión de precios (price_cents) sigue siendo la única edición de precio en esta versión.
+
 ### `stock_adjustments` — Catalog (tenant-scoped/RLS)
 
 An append-only signed-delta log driving the products.stock projection. Every stock movement — sale, void, or manual correction — writes exactly one row here. The invariant `products.stock = SUM(stock_adjustments.qty_delta)` (per product, per tenant) is the audit anchor for the entire stock model.

@@ -861,6 +861,65 @@ Products doc-backed (DESIGN.md:135 pan/huevos/hielo — the ONLY documented prod
 Refs implemented: DESIGN.md:210-217 (MÓDULO 5 — Inventario y Mermas), :212 (consulta rápida + semáforo), :213-217 (módulo de mermas/daños), :216 (tres motivos), :135 (pan/huevos/hielo — only documented products), :53 (danger-action), :305 (F2), :309 (Esc), :342 (search hint pattern); DATABASE.md:234-249 (products), :242 (stock projection), :270 (stock = SUM(qty_delta) invariant), :272-283 (stock_adjustments — no photo column), :277 (qty_delta NUMERIC(10,3)), :278 (source CHECK 'sale','void','manual'), :279 (reason), :739 (stock-adjustments queueable); ARCHITECTURE.md:126 (GET /products), :135 (POST /stock-adjustments), :87 (no blobs — Photos rule); spec ADI-1..3; DEFERRED delta evidence_photo_url (register D5, design §9b — UI renders no photo control, ADI-3.1; camera §5.1 states apply only once the delta lands). Spec-fixed items (flagged): semáforo thresholds (Verde > 5 / Amarillo 0 < x ≤ 5 / Rojo ≤ 0 — not documented numerically), no-hits copy, merma sample values ('Pan' qty 2, motivo 'Daño en vitrina'), quantity unit (integer for sample; contract NUMERIC(10,3)).
 ```
 
+#### Prompt Admin 8 — Catálogo maestro y márgenes (P8)
+
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate a high-fidelity desktop web application interface for the POS admin catalog screen (Catálogo Maestro) — tenant SKU list, product create/edit, and global-catalog adoption (autocomplete on first scan). No margin column and no margin alerts on this screen (deferred delta D11).
+
+Device: Desktop landscape viewport 1440x900px. This is the >=1280px branch of a responsive web layout (breakpoints per DESIGN.md §6.3 :316-318); do NOT render mobile bottom bars or segmented controls in this variant (:339).
+
+[1. Token contract — Block T verbatim (DESIGN.md §2.1 :37-53 + typography :55-66 + elevation :68-76 + badge-card D6)]
+Palette:
+| Token | Hex | Tailwind | Role |
+|---|---|---|---|
+| surface-bg | #F4F4F5 | bg-zinc-100 / bg-zinc-50 | 60% app background |
+| surface-card | #FFFFFF | bg-white | cards, displays, modal |
+| surface-subtle | #E4E4E7 | bg-zinc-200 | segmented controls, chips, dividers |
+| surface-border | #E4E4E7 / #D4D4D8 | border-zinc-200 | subtle borders |
+| text-primary | #18181B | text-zinc-900 | titles, main amounts |
+| text-secondary | #71717A | text-zinc-500 | subtitles, labels |
+| text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
+| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
+| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
+| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
+| badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
+| danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
+Typography: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; numeric/tabular = JetBrains Mono, ui-monospace, monospace with font-feature-settings "tnum" 1 (Layout Shift = 0).
+| Scale | Size | LH | Weight | Use |
+|---|---|---|---|---|
+| display-xl | 36px | 40px | 900 | giant change display (not used in admin) |
+| display-lg | 30px | 36px | 800 | numpad display (Login-2 PIN display area) |
+| heading-md | 20px | 28px | 700 | totals, modal titles |
+| body-md | 14px | 20px | 600 | buttons, product names |
+| body-sm | 12px | 16px | 500 | badges, connectivity, table cells |
+| caption-xs | 10px | 12px | 700 | uppercase labels (INGRESAR hints, section labels) |
+Elevation & radii: rounded-xl 12px (secondary buttons, keys); rounded-2xl 16px (cards, displays, modal); rounded-3xl 24px (bottom sheets — not used on admin desktop); shadow-xs 0 1px 2px rgba(0,0,0,0.05); shadow-keypad 0 2px 4px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06); shadow-emerald-glow 0 8px 24px -4px rgba(16,185,129,0.35).
+Design system: Shadcn UI clean light neutral, 60-30-10 (:13-16, :335). Connectivity badge: online = emerald (accent-primary family) 'En línea'; offline = amber badge-fiado 'Modo Offline - IndexedDB' (:127-129); pending-sync counter text 'X ventas por sincronizar' (:254).
+
+[2. Layout contract]
+Sidebar 240px fixed (:318, :340; FRONTEND.md:113) + content flex-1 (independent scroll). NO ticket panel on any admin screen (anti-drift R5). SearchBarF2 top ('[F2]' hint :305, :342) — search by name or GTIN. Dense SKU table from GET /products (ARCHITECTURE.md:126): name, GTIN (nullable :239), price_cents in JetBrains Mono (:240), uom (:241), stock projection (:242), photo thumb (photo_url :243). Create → POST /products (queueable :738); edit → PATCH /products/{id} (:128; additive-only :263; LWW on name/price/gtin/uom/photo_url/attributes with updated_at comparator :247, :263) — PATCH NOT queueable (queueable set exhaustive, DATABASE.md:736-741) → the edit form is disabled offline (ADCt-2.2 — no silent dropped edit); price edits = price_cents only (no cost column :234-249; margins deferred ADCt-4.1); stock NEVER edited here (converges via stock_adjustments :294; stock excluded from PATCH :263). Global-catalog adoption (:238-240): scan/enter GTIN not in the tenant catalog → S2-3 cache-miss lookup via API (:89; SPRINTS.md:91; global_barcodes → global_products :544-566) → autocomplete Name/Brand/Photo/Category (global_products.name + attributes :528-533) → operator enters Precio de Venta + Stock Inicial (:240, :242) → POST /products with global_product_id (F13 :266); miss → manual tenant create (SPRINTS.md:91; no fabricated global data; silent collisions server-side F20/F27 :747-749). Create/edit/adopt forms in AppModal (:303 — scale(0.95→1), cubic-bezier(0.16,1,0.3,1)). NO margin column/alerts (ADCt-4.1; delta need cost_cents recorded in the footer). Interaction: zero-latency (:297-299); :active scale(0.98) 120ms ease-out (:301); hover bg-zinc-50/border-zinc-300 fixed border (:302); prefers-reduced-motion (:264); no free animations (:266).
+
+[3. Keyboard map]
+F2 focuses search (:305); Esc clears search / closes the modal (:309); Enter submits; Arrow keys navigate rows; F3 (:306), F4 (:307), 1-6 (:308), Supr (:310) INACTIVE — station-scoped, declared not applicable.
+
+[4. Component inventory]
+Shadcn primitives: Card, Input, Badge, Button, Dialog (FRONTEND.md TASK 1.3 :81-83). Shared admin: Sidebar240, SearchBarF2 (DESIGN.md:342 pattern, :305, :309), ConnectivityBadge (:127-129, :254), AdminCard, AppModal (:303), MoneyText (:57), EmptyState. Module elements: SkuTable, ProductFormModal, GlobalAdoptionPanel (TASK 8.3 :151-152). Nothing invented (anti-pill).
+
+[5. States]
+Empty catalog (ADCt-1.2 — create + adopt entry points; onboarding :108-118). No-hits. Offline create queues (ADCt-2.1 — POST /products persists locally + queues; counter :254). Offline edit disabled (ADCt-2.2 — PATCH not queueable :736-741; disabled pattern :253). Adoption hit (ADCt-3.1 — autocomplete renders). Miss → manual create (ADCt-3.2). No margins (ADCt-4.1). Station states declared absent (:250-256).
+
+[6. Sample data]
+SKU rows — doc-backed names + P7-consistent stocks: 'Pan' S/ 4.80 (price doc-backed :344, :368) stock 20; 'Huevos' S/ 9.50 (SPEC-FIXED price, flagged) stock 3; 'Hielo' S/ 3.00 (SPEC-FIXED price, flagged) stock 0; GTIN: Pan '7750101001011' (SPEC-FIXED sample, flagged), Huevos/Hielo GTIN NULL (legal :239). Adoption sample: scanned GTIN maps to global 'Huevos' (doc-backed name) → autocomplete Name/Brand/Photo/Category → operator enters Precio de Venta (spec-fixed) + Stock Inicial 20 → POST /products with global_product_id (F13 :266). Miss sample: GTIN with no hit → manual tenant create 'Hielo' (doc-backed name).
+
+[7. Anti-drift footer]
+Refs implemented: DESIGN.md:235-243 (MÓDULO 7 — Catálogo Maestro), :238-240 (adopción global), :241-243 (márgenes — DEFERRED, not rendered), :108-118 (onboarding MÓDULO 0.2), :305 (F2), :309 (Esc), :342 (search hint pattern); FRONTEND.md:23 (keyboard-first); DATABASE.md:234-249 (products), :239 (gtin nullable), :240 (price_cents), :241 (uom), :242 (stock projection), :243 (photo_url), :249 (tombstone deleted_at), :263 (PATCH additive-only; stock excluded from PATCH), :266 (F13 adoption rule), :294 (stock converges via stock_adjustments), :528-533 (global_products name + attributes), :544-566 (global_barcodes mapping), :736-741 (queueable set exhaustive — PATCH NOT queueable), :738 (products queueable), :747-749 (F20/F27 silent collisions), :825 (out of this version); ARCHITECTURE.md:89 (S2-3 cache-miss lookup), :126-128 (GET/POST /products, PATCH /products/{id}); SPRINTS.md:91 (S2-3 cache-miss), :215 (purchases/suppliers and net profit later epic); spec ADCt-1..4; DEFERRED delta cost_cents (register D11, design §10 — no margin UI, ADCt-4.1). Spec-fixed items (flagged): Huevos price S/ 9.50, Hielo price S/ 3.00, Pan GTIN '7750101001011', adoption Precio de Venta + Stock Inicial 20, no-hits copy.
+```
+
 ---
 
 ## 8. Verificación y Criterios de Aceptación del Diseño
