@@ -306,6 +306,16 @@ An append-only signed-delta log driving the products.stock projection. Every sto
 **RLS**: tenant-scoped (Section 5).
 **Decision trace**: decision 8 (additive signed deltas; stock converges via the delta log, never LWW); OI-6 (every delta source writes a log row; products.stock = maintained projection); OI-10 (negative stock allowed — the delta log records the reality); F19 (nullable sale linkage with pair-nullity, same MD-9 pattern as fiado_movements); Convention 7 composite-FK companion deviation documented above.
 
+**Delta note — SDD stitch-admin-prompts (D5 DEFERRED; docs-only, NO DDL).** La pantalla de mermas (P7) NO renderiza control de foto/cámara (ADI-3.1): `stock_adjustments` no tiene columna de foto (:272-283) y DESIGN.md:215 ("Captura opcional de foto de evidencia con la cámara") no tiene contrato de almacenamiento. Delta futuro registrado:
+
+```text
+stock_adjustments.evidence_photo_url TEXT NULL     -- URL de object storage, espejo de products.photo_url (:243);
+                                                   --  regla Photos: no blobs en Postgres, Redis o IndexedDB (ARCHITECTURE.md:87);
+                                                   --  sin semántica de almacenamiento más allá de un string URL
+```
+
+Los estados de cámara §5.1 (DESIGN.md:250-251) aplican solo cuando el delta aterrice; en esta versión el formulario de merma no tiene ningún control de captura.
+
 
 ### `sales` — Ledger (tenant-scoped/RLS)
 

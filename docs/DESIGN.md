@@ -802,6 +802,65 @@ No deudores ('Sin deudores registrados', 0.4-9). No-hits (ADF-1.2 — spec-fixed
 Refs implemented: DESIGN.md:201-206 (MÓDULO 4 — Cuentas y Fiados), :203 (registro deudor en 2 clics), :204 (límites de crédito), :205 (abonos parciales efectivo/transferencia), :206 (share nativo; WhatsApp post-MVP), :49 (badge-fiado), :305 (F2), :309 (Esc), :342 (search hint pattern); DATABASE.md:378-386 (fiado_accounts), :383 (phone optional), :394 (balance = SUM(movements), never stored), :407 (amount_cents sign IS the kind), :410 (note), :415 (sale linkage F19), :714 (cursor-pulled — balance limit change named), :722 (LWW damage bound — balance limit named), :736 (fiado-movements queueable), :760 (F12 — atomic account upsert); ARCHITECTURE.md:132-133 (POST /fiado-movements, GET /fiado-accounts), :155 (WhatsApp non-goal); SPRINTS.md:153 (S6-4 — no wa.me in MVP); spec ADF-1..4; ADOPTED delta credit_limit_cents (register D4, design §9a — UI waits for the contract, rule D4). Spec-fixed items (flagged): no-hits copy, abono form layout, sample movement notes ('Venta fiada', 'Abono efectivo'), sample limit values (S/ 50.00 / S/ 20.00), list min-width ~320px (docs pin no absolute width).
 ```
 
+#### Prompt Admin 7 — Inventario y mermas (P7)
+
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate a high-fidelity desktop web application interface for the POS admin inventory screen (Inventario / Stock Rápido y Mermas) — stock query with semáforo and merma/damage registration. No photo/evidence-capture control on the merma form (deferred delta D5).
+
+Device: Desktop landscape viewport 1440x900px. This is the >=1280px branch of a responsive web layout (breakpoints per DESIGN.md §6.3 :316-318); do NOT render mobile bottom bars or segmented controls in this variant (:339).
+
+[1. Token contract — Block T verbatim (DESIGN.md §2.1 :37-53 + typography :55-66 + elevation :68-76 + badge-card D6)]
+Palette:
+| Token | Hex | Tailwind | Role |
+|---|---|---|---|
+| surface-bg | #F4F4F5 | bg-zinc-100 / bg-zinc-50 | 60% app background |
+| surface-card | #FFFFFF | bg-white | cards, displays, modal |
+| surface-subtle | #E4E4E7 | bg-zinc-200 | segmented controls, chips, dividers |
+| surface-border | #E4E4E7 / #D4D4D8 | border-zinc-200 | subtle borders |
+| text-primary | #18181B | text-zinc-900 | titles, main amounts |
+| text-secondary | #71717A | text-zinc-500 | subtitles, labels |
+| text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
+| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
+| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
+| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
+| badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
+| danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
+Typography: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; numeric/tabular = JetBrains Mono, ui-monospace, monospace with font-feature-settings "tnum" 1 (Layout Shift = 0).
+| Scale | Size | LH | Weight | Use |
+|---|---|---|---|---|
+| display-xl | 36px | 40px | 900 | giant change display (not used in admin) |
+| display-lg | 30px | 36px | 800 | numpad display (Login-2 PIN display area) |
+| heading-md | 20px | 28px | 700 | totals, modal titles |
+| body-md | 14px | 20px | 600 | buttons, product names |
+| body-sm | 12px | 16px | 500 | badges, connectivity, table cells |
+| caption-xs | 10px | 12px | 700 | uppercase labels (INGRESAR hints, section labels) |
+Elevation & radii: rounded-xl 12px (secondary buttons, keys); rounded-2xl 16px (cards, displays, modal); rounded-3xl 24px (bottom sheets — not used on admin desktop); shadow-xs 0 1px 2px rgba(0,0,0,0.05); shadow-keypad 0 2px 4px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06); shadow-emerald-glow 0 8px 24px -4px rgba(16,185,129,0.35).
+Design system: Shadcn UI clean light neutral, 60-30-10 (:13-16, :335). Connectivity badge: online = emerald (accent-primary family) 'En línea'; offline = amber badge-fiado 'Modo Offline - IndexedDB' (:127-129); pending-sync counter text 'X ventas por sincronizar' (:254).
+
+[2. Layout contract]
+Sidebar 240px fixed (:318, :340; FRONTEND.md:113) + content flex-1 (independent scroll). NO ticket panel on any admin screen (anti-drift R5). SearchBarF2 top ('[F2]' hint :305, :342) — search by GTIN/barcode or name (:212) over GET /products (ARCHITECTURE.md:126; stock = SUM(qty_delta) projection :242, :270). Dense product rows: name + stock + semáforo (:212) — Verde stock > 5 / Amarillo 0 < stock ≤ 5 / Rojo stock ≤ 0 (thresholds SPEC-FIXED design decision, flagged 0.4-6; semáforo colors: Verde emerald accent family, Amarillo badge-fiado :49, Rojo danger-action :53). Merma flow (:213-217): direct report action per row (danger-action — mermas listed under danger-action :53) → AppModal (:303): motivo selector EXACT three values 'Vencimiento', 'Rotura en transporte', 'Daño en vitrina' (:216); quantity field (integer units for the sample; contract NUMERIC(10,3) :277); explicit confirmation before queueing (destructive action confirmed). Submit → POST /stock-adjustments (ARCHITECTURE.md:135; queueable :739): qty_delta negative, source 'manual', reason = motivo (:277-279); stock reduces WITHOUT a sale movement (:217; invariant :270; source never 'sale' :278). NO photo control (ADI-3.1: stock_adjustments has no photo column :272-283; evidence_photo_url deferred delta D5 §9b; camera §5.1 states NOT rendered — apply only once the delta lands). Modal opens scale(0.95→1) with cubic-bezier(0.16,1,0.3,1) (:303). Interaction: zero-latency (:297-299); :active scale(0.98) 120ms ease-out (:301); hover bg-zinc-50/border-zinc-300 fixed border (:302); prefers-reduced-motion (:264); no free animations (:266).
+
+[3. Keyboard map]
+F2 focuses search (:305); Esc clears search / closes the modal (:309); Enter submits the merma; Arrow keys navigate rows; F3 (:306), F4 (:307), 1-6 (:308), Supr (:310) INACTIVE — station-scoped, declared not applicable.
+
+[4. Component inventory]
+Shadcn primitives: Card, Input, Badge, Button, Dialog (FRONTEND.md TASK 1.3 :81-83). Shared admin: Sidebar240, SearchBarF2 (DESIGN.md:342 pattern, :305, :309), ConnectivityBadge (:127-129, :254), AdminCard, AppModal (:303), MoneyText (:57), EmptyState. Module elements: StockRow (semáforo), MermaModal (TASK 8.1 :147-148). Nothing invented (anti-pill).
+
+[5. States]
+No-hits empty (ADI-1.2 — spec-fixed copy; grid/search stays active, non-blocking pattern :252). Empty catalog. Offline queues (ADI-2.2 — merma persists locally + queues; counter :254). Semáforo three states (ADI-1.1: 20/3/0). Merma confirmation (destructive confirmed). Camera states NOT rendered (deferred delta ADI-3 — apply only once evidence_photo_url lands). Station states declared absent (:250-256).
+
+[6. Sample data]
+Products doc-backed (DESIGN.md:135 pan/huevos/hielo — the ONLY documented products): 'Pan' stock 20 (Verde), 'Huevos' stock 3 (Amarillo), 'Hielo' stock 0 (Rojo) — exact ADI-1.1 shape. Merma alternate render: modal on 'Pan', qty 2, motivo 'Daño en vitrina' → stock projects 18 (internally consistent; ADI-2.1 shape: negative delta qty_delta −2, source 'manual', no sale row).
+
+[7. Anti-drift footer]
+Refs implemented: DESIGN.md:210-217 (MÓDULO 5 — Inventario y Mermas), :212 (consulta rápida + semáforo), :213-217 (módulo de mermas/daños), :216 (tres motivos), :135 (pan/huevos/hielo — only documented products), :53 (danger-action), :305 (F2), :309 (Esc), :342 (search hint pattern); DATABASE.md:234-249 (products), :242 (stock projection), :270 (stock = SUM(qty_delta) invariant), :272-283 (stock_adjustments — no photo column), :277 (qty_delta NUMERIC(10,3)), :278 (source CHECK 'sale','void','manual'), :279 (reason), :739 (stock-adjustments queueable); ARCHITECTURE.md:126 (GET /products), :135 (POST /stock-adjustments), :87 (no blobs — Photos rule); spec ADI-1..3; DEFERRED delta evidence_photo_url (register D5, design §9b — UI renders no photo control, ADI-3.1; camera §5.1 states apply only once the delta lands). Spec-fixed items (flagged): semáforo thresholds (Verde > 5 / Amarillo 0 < x ≤ 5 / Rojo ≤ 0 — not documented numerically), no-hits copy, merma sample values ('Pan' qty 2, motivo 'Daño en vitrina'), quantity unit (integer for sample; contract NUMERIC(10,3)).
+```
+
 ---
 
 ## 8. Verificación y Criterios de Aceptación del Diseño
