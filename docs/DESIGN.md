@@ -50,6 +50,7 @@ Este sistema de tokens está estructurado para integrarse nativamente con **Goog
 | `badge-yape` | `#7C3AED` | `bg-purple-600` | Identidad billeteras digitales QR (Yape) |
 | `badge-plin` | `#0284C7` | `bg-sky-600` | Identidad billeteras digitales QR (Plin) |
 | `badge-other` | `#52525B` | `bg-zinc-600` | Método de pago residual "Otro" (entidad neutra) |
+| `badge-card` | `#2563EB` | `bg-blue-600` | Identidad del método de pago Tarjeta (pintado azul de Tarjeta :417; delta D6 — SDD stitch-admin-prompts) |
 | `danger-action` | `#E11D48` | `bg-rose-600` / `text-rose-500` | Botón borrar numpad, mermas, vaciar carro |
 
 ### 2.2 Tipografía y Escalas (Typography)
@@ -504,6 +505,65 @@ None — wordmark only; no tenant data pre-auth (DATABASE.md:184).
 
 [7. Anti-drift footer]
 Refs implemented: DESIGN.md:101-106 (dual login contract), :104 (Empleado PIN subline), :106 (Administrador subline), :127-129 (connectivity badge), :297-299 (zero-latency frequent actions), :301-302 (active/hover), :335 (Shadcn 60-30-10); FRONTEND.md:1 (wordmark), :23 (keyboard-first), :54 (Lucide icons); DATABASE.md:184 (no SELECT on tenants, F14); spec ADL-1, ADL-4; delta D2 (login layout fixed by this spec — no prior visual record, DESIGN.md:101-106 functional only; FRONTEND.md:37-43 no login component). Spec-fixed items (flagged): role-card layout, hint copy 'Usa ← → para elegir · Enter para continuar', keyboard map (ArrowLeft/Right + Enter).
+```
+
+#### Prompt Admin 2 — Login-2: credencial (P2)
+
+```text
+System: Google Stitch UI Engine v1.0
+Task: Generate a high-fidelity desktop web application interface for the POS admin login — screen 2 of 2: the credential screen. PRIMARY render = Administrador variant (phone + master password). SECONDARY render = Empleado variant (4-digit PIN keypad), same screen, second frame.
+
+Device: Desktop landscape viewport 1440x900px. This is the >=1280px branch of a responsive web layout (breakpoints per DESIGN.md §6.3 :316-318); do NOT render mobile bottom bars or segmented controls in this variant (:339).
+
+[1. Token contract — Block T verbatim (DESIGN.md §2.1 :37-53 + typography :55-66 + elevation :68-76 + badge-card D6)]
+Palette:
+| Token | Hex | Tailwind | Role |
+|---|---|---|---|
+| surface-bg | #F4F4F5 | bg-zinc-100 / bg-zinc-50 | 60% app background |
+| surface-card | #FFFFFF | bg-white | cards, displays, modal |
+| surface-subtle | #E4E4E7 | bg-zinc-200 | segmented controls, chips, dividers |
+| surface-border | #E4E4E7 / #D4D4D8 | border-zinc-200 | subtle borders |
+| text-primary | #18181B | text-zinc-900 | titles, main amounts |
+| text-secondary | #71717A | text-zinc-500 | subtitles, labels |
+| text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
+| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
+| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
+| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
+| badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
+| danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
+Typography: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; numeric/tabular = JetBrains Mono, ui-monospace, monospace with font-feature-settings "tnum" 1 (Layout Shift = 0).
+| Scale | Size | LH | Weight | Use |
+|---|---|---|---|---|
+| display-xl | 36px | 40px | 900 | giant change display (not used in admin) |
+| display-lg | 30px | 36px | 800 | numpad display (Login-2 PIN display area) |
+| heading-md | 20px | 28px | 700 | totals, modal titles |
+| body-md | 14px | 20px | 600 | buttons, product names |
+| body-sm | 12px | 16px | 500 | badges, connectivity, table cells |
+| caption-xs | 10px | 12px | 700 | uppercase labels (INGRESAR hints, section labels) |
+Elevation & radii: rounded-xl 12px (secondary buttons, keys); rounded-2xl 16px (cards, displays, modal); rounded-3xl 24px (bottom sheets — not used on admin desktop); shadow-xs 0 1px 2px rgba(0,0,0,0.05); shadow-keypad 0 2px 4px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06); shadow-emerald-glow 0 8px 24px -4px rgba(16,185,129,0.35).
+Design system: Shadcn UI clean light neutral, 60-30-10 (:13-16, :335). Connectivity badge: online = emerald (accent-primary family) 'En línea'; offline = amber badge-fiado 'Modo Offline - IndexedDB' (:127-129); pending-sync counter text 'X ventas por sincronizar' (:254).
+
+[2. Layout contract]
+Centered auth card ~420px (surface-card, rounded-2xl 16px :71, shadow-xs :74), full-viewport surface-bg. No sidebar, no ticket panel (anti-drift R5). PRIMARY render — Administrador variant: back affordance (icon-button with aria-label 'Volver al selector de rol', Lucide arrow-left; Esc = back to Login-1, ADL-2.4 :309); two labeled fields, each with helper text underneath (spec-fixed): 'Teléfono' (type=tel, inputmode=tel, autocomplete="tel" — pinned to users.phone, DATABASE.md:195, D9; helper 'Usa el teléfono del administrador') and 'Contraseña maestra' (type=password, autocomplete="current-password"; helper 'Contraseña configurada al registrar el negocio'); 52px accent-primary full-width button 'INGRESAR' (uppercase CTA style DESIGN.md:150-174; touch height :151). Submit binds POST /auth/admin-login (IDA-2, ARCHITECTURE.md delta D2). SECONDARY render — Empleado variant (same screen, second frame): 4-digit PIN dot display (caption-xs label 'PIN', spec-fixed adaptation of the numpad monetary display :143; display-lg 30px dots) + ErgonomicNumpad 3x4, 56px keys (:142-145; FRONTEND.md:41), rows 1-2-3 / 4-5-6 / 7-8-9 / 0-Borrar (Borrar key = danger-action :53, shadow-keypad :75). Unlock binds devices.pin_hash + offline_session_valid_until (DATABASE.md:217-218), offline validity 7+ days (DESIGN.md:104), frozen scope 1 device / 1 cashier — NO cashier-by-photo/shift selector (:105). Interaction: zero-latency submit (:297-299); loading submit = no animation (frequent action); prefers-reduced-motion (:264); :active scale(0.98) 120ms ease-out (:301); disabled button = opacity 40%, no glow (disabled-COBRAR pattern :253).
+
+[3. Keyboard map]
+Esc = back to Login-1 (:309, ADL-2.4); Enter submits (online only; offline = no-op, button disabled); Tab moves between fields (a11y); Empleado variant: physical digits 0-9 + Backspace + Enter (keyboard-first :304); F2 (:305), F3 (:306), F4 (:307), 1-6 (:308), Supr (:310) INACTIVE — station-scoped, declared not applicable.
+
+[4. Component inventory]
+Shadcn primitives: Card, Button, Input, Badge (FRONTEND.md TASK 1.3 :81-83). ErgonomicNumpad (FRONTEND.md:41; DESIGN.md:142-145). ConnectivityBadge (DESIGN.md:127-129). Icon-button back affordance with aria-label (Lucide, :54). Nothing invented (anti-pill).
+
+[5. States]
+Admin variant: offline (ADL-2.3 — INGRESAR disabled, opacity 40%, no glow, :253 pattern; connectivity hint, no block modal); error 401 (ADL-2.2 — inline danger-action :53, generic message + next step, focus moves to first errored field, no token stored); loading submit = no animation (:297-299). Empleado variant: PIN error (danger-action :53 + vibration [30,60,30] where haptics exist :265); expired offline_session_valid_until → client refuses offline unlock (DATABASE.md:218) and requests connectivity WITHOUT blocking a later online attempt (ADL-3.2); offline-within-window unlock OK (:104, :218). ConnectivityBadge 'En línea' / 'Modo Offline - IndexedDB' (:127-129). Station states declared absent (camera :250-251, code-not-found :252, empty-cart :253, sync-pending :254, conflict :255, sale-success :256).
+
+[6. Sample data]
+Empty fields (no pre-filled credentials). Error copy (spec-fixed, flagged): 'Credenciales incorrectas. Verifica tu teléfono y contraseña maestra.' + next step — generic message, no user enumeration (IDA-2.2).
+
+[7. Anti-drift footer]
+Refs implemented: DESIGN.md:104-106 (credential contract), :105 (frozen 1 device/1 cashier — no shift/photo selector), :127-129 (connectivity badge), :142-145 (ErgonomicNumpad), :151 (52px touch height), :253 (disabled pattern), :265 (haptics), :297-299 (zero-latency), :301-303 (active/hover/modal), :309 (Esc); FRONTEND.md:23 (keyboard-first), :41 (ErgonomicNumpad); DATABASE.md:195 (users.phone), :201 (phone UNIQUE), :217-218 (pin_hash + offline_session_valid_until); ARCHITECTURE.md:23 (JWT), :120 (error shape), :124-125 (auth surface — /auth/login, /auth/device-bind); spec ADL-2, ADL-3, ADL-4, IDA-2, IDA-3; deltas D1-D3 (tenants.master_password_hash, POST /auth/admin-login, JWT role:"admin"), D9 (login identifier pinned to phone — users has no email, DATABASE.md:191-206). Spec-fixed items (flagged): helper copy under fields, 401 error copy + next step, 'INGRESAR' CTA label, PIN dot display adaptation (numpad :143 has no PIN precedent), Empleado keyboard map (digits + Backspace), 52px height application.
 ```
 
 ---

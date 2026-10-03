@@ -44,6 +44,7 @@ El diseño se encuentra estandarizado e inspeccionado a partir de los dos proyec
 - **Resumen de Orden:** `OrderSummaryPanel` (Líneas de carrito con incrementador `- / +`, subtotal, IGV y total).
 - **Modal Checkout:** `MultimethodCheckoutModal` (6 tenders de `DATABASE.md`: Efectivo, Yape, Plin, Tarjeta, Otro, Fiado; billetes rápidos y display gigante de vuelto).
 - **Admin Suite — Login-1 (selector de rol, desktop):** `RoleSelectorScreen` (AuthCard centrada con wordmark 'POS SaaS' y dos tarjetas de rol `RoleCard` — Empleado/Administrador — con íconos Lucide y hint de teclado caption-xs; ConnectivityBadge en esquina; sin datos de tenant pre-auth).
+- **Admin Suite — Login-2 (credencial, desktop):** `AdminCredentialForm` (variante Admin: back affordance + 'Teléfono' + 'Contraseña maestra' + botón 'INGRESAR' 52px accent-primary; binds `POST /auth/admin-login`) y `PinCredentialPanel` (variante Empleado: display de 4 puntos + reuso del `ErgonomicNumpad` 3x4 56px existente, :41, adaptado a PIN).
 
 ---
 
