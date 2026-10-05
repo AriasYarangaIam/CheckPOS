@@ -35,9 +35,9 @@ Fuera: tocar P3-P8 existentes (ya aceptados); borrar/renombrar en Stitch (imposi
 - [x] **D1** Generar Login Dual split (Stitch, flash-lite) — reemplaza P1/P2A/P2E — HECHO 2026-10-05: screen `849b707f...` (`POS SaaS - Selección de Rol y Login Dual`), G1/G2 PASS a la primera
 - [x] **D2** Generar Mermas y Daños dedicada (Stitch, flash-lite) — HECHO 2026-10-05: screen `85d03bb7...`, G1/G2 PASS a la primera (1 fila Pan −2, modal 3 motivos, sin foto)
 - [x] **D3** Verificación G1/G2 por HTML de D1+D2 + rondas acotadas (≤2 c/u) — HECHO: ambas PASS sin rondas (residual leve: fecha 26/10/2026 no pineada en spec)
-- [ ] **D4** Lista canónica final (9 IDs) + commit del doc + resumen para batería Figma
-- [ ] **D3** Verificación G1/G2 por HTML de D1+D2 + rondas acotadas (≤2 c/u)
-- [ ] **D4** Lista canónica final (9 IDs) + commit del doc + resumen para batería Figma
+- [x] **D4** Lista canónica final + commit del doc (`6f89194`) + resumen para batería Figma — HECHO 2026-10-05
+  - Login Dual `849b707f...` (reemplaza P1/P2A/P2E) · P3 `c845efa5...` · P4 `97171a2c...` · P5 `088ce929...` · P6 `ebc6c5f8...` · P7 `c924b742...` · P8 `c225d39c...` · Mermas `85d03bb7...`
+  - Excluir TODO lo demás del proyecto (duplicados, legacy, P1/P2 viejos)
 
 ## Authorized scope
 
