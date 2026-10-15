@@ -41,6 +41,14 @@ afterEach(async () => {
   createdNames.clear()
 })
 
+/*
+ * Las fixtures están tipadas con el tipo de la fila, no solo escritas con su
+ * forma: `tsc` rechaza una fila a la que le falte un campo o le sobre uno, así
+ * que la garantía de forma de `CartRow` / `IdempotencyQueueRow` es de tiempo de
+ * compilación. Es una línea de defensa legítima y distinta: Dexie guarda los
+ * campos que no son índice tal como llegan, sin validarlos al escribir, de modo
+ * que no existe una aserción de tiempo de ejecución equivalente.
+ */
 const CART_LINES: readonly CartRow[] = [
   { id: 'line-1', product_id: 'prod-1', qty: 2, unit_price_cents: 350 },
   { id: 'line-2', product_id: 'prod-2', qty: 1, unit_price_cents: 1250 },
@@ -63,18 +71,82 @@ const QUEUED_EVENTS: readonly IdempotencyQueueRow[] = [
   },
 ]
 
+/*
+ * Especificación de almacenes: la clave primaria y los índices con los que Dexie
+ * abre cada tabla (docs/FRONTEND.md:96-100). Es lo que el esquema impone de
+ * verdad, a diferencia de la forma de la fila, que no valida nada.
+ */
+const DECLARED_STORES: readonly {
+  readonly table: string
+  readonly primaryKey: string
+  readonly indexes: readonly string[]
+}[] = [
+  { table: 'products', primaryKey: 'id', indexes: ['gtin', 'name', 'category'] },
+  { table: 'cart', primaryKey: 'id', indexes: ['product_id'] },
+  { table: 'idempotency_queue', primaryKey: 'id', indexes: ['key', 'status', 'created_at'] },
+]
+
+/** Clave primaria y caminos de índice declarados, tabla por tabla. */
+function declaredPaths(database: PosDatabase): { name: string; paths: string[] }[] {
+  return database.tables.map((table) => ({
+    name: table.name,
+    paths: [
+      String(table.schema.primKey.keyPath),
+      ...table.schema.indexes.map((index) => String(index.keyPath)),
+    ],
+  }))
+}
+
 describe('PosDatabase schema', () => {
+  it('declares the primary key and the index paths each store opens with', async () => {
+    const database = freshDatabase()
+    await database.open()
+
+    try {
+      expect(database.tables.map((table) => table.name).sort()).toEqual(
+        DECLARED_STORES.map((store) => store.table).sort(),
+      )
+
+      for (const store of DECLARED_STORES) {
+        const schema = database.table(store.table).schema
+
+        expect(String(schema.primKey.keyPath), `${store.table} primKey`).toBe(store.primaryKey)
+        expect(
+          schema.indexes.map((index) => String(index.keyPath)).sort(),
+          `${store.table} índices`,
+        ).toEqual([...store.indexes].sort())
+      }
+    } finally {
+      database.close()
+    }
+  })
+
   it('exposes only the local tables, never one holding the global catalog', async () => {
     const database = freshDatabase()
     await database.open()
 
-    const tables = database.tables.map((table) => table.name).sort()
+    const declared = declaredPaths(database)
     database.close()
 
     // Criterio de W1-FE-4: lo local es el catálogo del tenant, el carrito y la
     // cola. Un volcado del catálogo global no tiene tabla acá (DATABASE.md:160).
-    expect(tables).toEqual(['cart', 'idempotency_queue', 'products'])
-    expect(tables.some((name) => /global|catalog/i.test(name))).toBe(false)
+    expect(declared.map((entry) => entry.name).sort()).toEqual([
+      'cart',
+      'idempotency_queue',
+      'products',
+    ])
+
+    // El conjunto exacto de arriba ya descarta una tabla con cualquier otro
+    // nombre —una heurística sobre nombres se evade con un nombre como
+    // `master_skus`—, así que lo que se afirma acá es que tampoco haya un camino
+    // declarado (clave primaria o índice) apuntando al catálogo global. Los
+    // campos que no son índice quedan fuera de alcance: los impone el tipo de la
+    // fila en tiempo de compilación, no el esquema.
+    for (const entry of declared) {
+      for (const path of [entry.name, ...entry.paths]) {
+        expect(path).not.toMatch(/global|catalog/i)
+      }
+    }
   })
 
   it('keeps the local catalog projection and not the global row', async () => {
@@ -96,17 +168,11 @@ describe('PosDatabase schema', () => {
     database.close()
 
     // El dueño de la fila es el tenant: trae su precio y su stock, que el
-    // catálogo global no tiene.
-    expect(Object.keys(stored ?? {}).sort()).toEqual([
-      'category',
-      'gtin',
-      'id',
-      'name',
-      'photo_url',
-      'price_cents',
-      'stock',
-      'uom',
-    ])
+    // catálogo global no tiene. La forma de la fila no se afirma acá —Dexie
+    // guarda los campos que no son índice sin validarlos, así que comparar las
+    // claves guardadas contra las que se escribieron sería una tautología—: esa
+    // garantía es de compilación, vía el tipo `ProductRow` que `tsc` impone.
+    // Lo que corresponde afirmar en ejecución es el viaje de ida y vuelta.
     expect(stored?.price_cents).toBe(350)
     expect(stored?.stock).toBe(24)
   })
@@ -223,8 +289,22 @@ describe('PosDatabase persistence across a reload', () => {
 })
 
 describe('getPosDatabase', () => {
-  it('hands out one lazy instance for the application', () => {
-    expect(getPosDatabase()).toBe(getPosDatabase())
-    expect(getPosDatabase().name).toBe(POS_DATABASE_NAME)
+  it('opens no connection until the first operation', async () => {
+    const database = getPosDatabase()
+    createdNames.add(database.name)
+
+    try {
+      expect(database.name).toBe(POS_DATABASE_NAME)
+      // La pereza es el punto del accesor: importar el módulo y pedir la
+      // instancia no abre IndexedDB, así que el arranque de la PWA no depende de
+      // la base; la conexión nace con la primera operación real.
+      expect(database.isOpen()).toBe(false)
+
+      await database.cart.count()
+
+      expect(database.isOpen()).toBe(true)
+    } finally {
+      database.close()
+    }
   })
 })
