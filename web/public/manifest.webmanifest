@@ -1,0 +1,20 @@
+{
+  "name": "POS SaaS - Punto de venta",
+  "short_name": "POS SaaS",
+  "description": "Punto de venta offline-first para bodegas y minimarkets.",
+  "lang": "es-PE",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4F4F5",
+  "theme_color": "#10B981",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
