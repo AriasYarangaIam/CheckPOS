@@ -30,7 +30,12 @@ describe('Button', () => {
     expect(button.className).toContain('active:scale-[0.98]')
     expect(button.className).toContain('transition-transform')
     expect(button.className).toContain('duration-[120ms]')
-    expect(button.className).not.toContain('transition-all')
+    // El literal se arma por partes a propósito: Tailwind escanea también los
+    // archivos de test como fuente, y leer el nombre completo de la utilidad de
+    // transición global bastaba para emitir su regla, muerta, en el CSS
+    // publicado. La garantía de fondo vive en `motion-contract.test.ts`; acá
+    // solo evitamos inyectar en el bundle justo lo que prohibimos.
+    expect(button.className).not.toContain(`transition${'-'}all`)
   })
 
   it('stays a plain button so it never submits a form by accident', () => {

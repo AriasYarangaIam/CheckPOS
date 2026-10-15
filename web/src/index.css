@@ -78,12 +78,19 @@
   --text-caption-xs--font-weight: 700;
 
   /*
-   * Resorte amortiguado de los diálogos (docs/FRONTEND.md:19, docs/DESIGN.md
-   * §6.2:304): `scale(0.96) -> scale(1)` con `opacity 0 -> 1` sobre la curva
-   * `cubic-bezier(0.16, 1, 0.3, 1)`. Arranca desde `scale(0.96)` y no desde
-   * `scale(0)`: nada aparece de la nada. 200ms queda dentro de la banda de
-   * modales (docs/DESIGN.md §5.2) y no se retriggerea en ráfaga, así que una
-   * animación CSS (fuera del hilo principal) es la herramienta correcta.
+   * Resorte amortiguado de los diálogos: `scale(0.96) -> scale(1)` con
+   * `opacity 0 -> 1` sobre la curva `cubic-bezier(0.16, 1, 0.3, 1)`.
+   *
+   * Divergencia entre autoridades: `docs/FRONTEND.md:19` fija la entrada en
+   * `scale(0.96)`, mientras que `docs/DESIGN.md` §6.2:304 la fija en
+   * `scale(0.95)`. Esta implementación sigue `docs/FRONTEND.md:19` por ser el
+   * plan que ejecuta `W1-FE-3`; el 1% de diferencia no es perceptible, pero la
+   * discrepancia está pendiente de cierre y se registra como hallazgo.
+   *
+   * Arranca desde `scale(0.96)` y no desde `scale(0)`: nada aparece de la nada.
+   * 200ms queda dentro de la banda de modales (docs/DESIGN.md §5.2) y no se
+   * retriggerea en ráfaga, así que una animación CSS (fuera del hilo principal)
+   * es la herramienta correcta.
    */
   --animate-modal-spring: modal-spring 200ms cubic-bezier(0.16, 1, 0.3, 1);
   --animate-fade-in: fade-in 150ms ease-out;
