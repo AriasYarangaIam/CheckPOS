@@ -1,4 +1,4 @@
-// Package sync implementa el módulo Sync: el claim de idempotencia que hace repetible
+// Package synckey implementa el módulo Sync: el claim de idempotencia que hace repetible
 // cada POST encolable y el pull por cursor.
 //
 // Tablas que posee: `idempotency_keys` (docs/DATABASE.md §4, grupo 6).
@@ -14,9 +14,11 @@
 // Ningún módulo escribe las tablas de otro módulo (ARCHITECTURE.md:31): este módulo es
 // dueño del claim, y cada módulo decide qué hacer después de reclamarlo.
 //
-// El nombre del paquete coincide con el del módulo y no con la biblioteca estándar `sync`;
-// quien importe ambos en el mismo archivo debe usar un alias.
+// El paquete se llama `synckey` y no `sync` a propósito: el módulo del contrato se llama
+// Sync (ARCHITECTURE.md:41), pero un paquete `sync` ensombrecería la biblioteca estándar en
+// todo archivo que necesite ambas. El directorio lleva el nombre del paquete, así que el
+// módulo se reconoce por su tabla dueña, `idempotency_keys` (decidido 2026-10-15).
 //
 // Sprint 1 solo declara la frontera: el protocolo de claim y el cursor son Sprint 6
 // (docs/BACKEND.md §10.6, §6).
-package sync
+package synckey
