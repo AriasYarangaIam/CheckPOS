@@ -101,8 +101,12 @@ Escritura: `SPRINTS.md` (fila `W1-DB-0`), `docs/BACKEND.md` §10.1 (alineación)
 
 ## Next step
 
-U7 (tokens) → U8 (primitivas) → U9 (Dexie) → U10 (revisión de los tres documentales de congelamiento). Con eso Sprint 1 cierra su Definition of Done: ambos runners corriendo y pasando, 14 tablas aplicadas, y los tres documentos revisados.
+U7 (tokens) → U8 (primitivas) → U9 (Dexie) → U10 (revisión de los tres documentales de congelamiento). Con eso Sprint 1 cierra su Definition of Done: ambos runners corriendo y pasando, 14 tablas aplicadas y los tres documentos revisados.
 
-Después: la cadena de PR hacia `develop`. Tamaños reales para decidir el corte — capa DB ~853 líneas autoradas (5 commits), capa Go ~1820 (3 commits), capa web ~243 más el lockfile generado (1 commit). El presupuesto de revisión de 400 líneas por PR obliga a cortes más finos o a `size:exception` como mantenedor; cortar el conjunto de migraciones entre PRs dejaría una PR que no aplica.
+Estado de entrega al 2026-10-15: **PR #1 (`feat/sprint-1-foundations` → `develop`) y PR #2 (`develop` → `main`) mergeados por el usuario.** La capa DB, la capa Go y el scaffold web ya están en `main`. La rama del sprint conserva un commit huérfano y superado (`6782611`, primer intento de README) que no debe mergearse; el README definitivo viaja en la rama de limpieza.
 
-Push remoto: no ejecutado. Requiere autorización explícita de destino y operación.
+Rama de limpieza `chore/repo-cleanup` (base `develop`, mismo flujo hacia `main`): resuelve la duplicación de `DESIGN.md`, versiona `odd/tasks` completo y deja los documentos del proyecto en el remoto. Contiene 10 commits propios más un merge de puesta al día con `develop`.
+
+Sobre el presupuesto de revisión: el PR de limpieza son ~2.700 líneas de documentación. El presupuesto de 400 líneas por PR está pensado para carga de revisión de código; documentación de contrato se revisa por sección, no por conteo. El PR del sprint, en cambio, fueron ~2.900 líneas autoradas de código y se mergeó como una sola pieza.
+
+Push remoto: ejecutado con autorización explícita del usuario (`develop`, `feat/sprint-1-foundations`, `chore/repo-cleanup`).
