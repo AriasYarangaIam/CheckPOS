@@ -3,3 +3,9 @@
 
 # Local environment (holds DATABASE_URL; .env.example is the committed template)
 .env
+
+# Frontend PWA (web/): dependencies and build output are never committed
+node_modules/
+web/dist/
+*.tsbuildinfo
+coverage/

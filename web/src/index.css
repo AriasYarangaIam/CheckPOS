@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/*
+ * La capa de tokens de diseño (paleta 60-30-10 y tipografía Inter / JetBrains
+ * Mono con tnum) aterriza en W1-FE-2 sobre este mismo archivo mediante `@theme`.
+ * Sprint 1 no declara tokens: solo monta el pipeline de Tailwind.
+ */
