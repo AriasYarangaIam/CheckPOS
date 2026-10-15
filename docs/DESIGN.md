@@ -43,8 +43,8 @@ Este sistema de tokens está estructurado para integrarse nativamente con **Goog
 | `text-primary` | `#18181B` | `text-zinc-900` | Títulos, importes monetarios principales |
 | `text-secondary` | `#71717A` | `text-zinc-500` | Subtítulos, horas de turno, etiquetas |
 | `text-muted` | `#A1A1AA` | `text-zinc-400` | Placeholders, separadores secundarios |
-| `accent-primary` | `#10B981` | `bg-emerald-500` | Acento (10%): Botón `COBRAR`, esquinas visor |
-| `accent-hover` | `#059669` | `bg-emerald-600` | Estado hover/active del botón de cobro |
+| `accent-primary` | `#10B981` | `bg-emerald-500` | Acento (10%): esquinas del visor, anillos de foco y acentos de éxito |
+| `accent-hover` | `#059669` | `bg-emerald-600` | Fondo del botón `COBRAR`: el único paso del acento que admite texto blanco con contraste AA |
 | `accent-glow` | `rgba(16,185,129,0.3)` | `shadow-emerald-500/30` | Resplandor de elevación del botón principal |
 | `badge-fiado` | `#F59E0B` | `bg-amber-500` / `text-amber-700` | Módulo de cuentas corrientes / fiados |
 | `badge-yape` | `#7C3AED` | `bg-purple-600` | Identidad billeteras digitales QR (Yape) |
@@ -150,7 +150,7 @@ graph TD
 - Fila superior: Cantidad de ítems en carrito (`Tickets (X productos)`), subtotal acumulado y botón `Vaciar`.
 - **Botón Primario `COBRAR`:**
   - Altura táctil: **52px**.
-  - Color: **Verde Esmeralda** (`#10B981` / `emerald-600`) con tipografía Bold de alto contraste en blanco.
+  - Color: **Verde Esmeralda** (`#059669` / `emerald-600`) con tipografía Bold y texto blanco. El relleno es `accent-hover`, no `accent-primary`: blanco sobre `#10B981` mide **2,54:1** y no alcanza el umbral AA de 3:1 para texto grande, mientras que sobre `#059669` mide **3,77:1** y sí lo alcanza. El estado hover/active conserva el relleno, refuerza `accent-glow` y aplica `:active { transform: scale(0.98) }` (§6.2:302).
   - Despliegue del total a cobrar en tipografía monoespaciada a la derecha.
 
 ---
@@ -336,7 +336,7 @@ Device: Desktop landscape viewport 1440x900px. This is the >=1280px branch of a 
 Design System: Shadcn UI clean light neutral, 60-30-10 color rule.
 Background (60%): Clean off-white surface-100 (#F4F4F5), pure white cards (#FFFFFF), crisp border-zinc-200.
 Secondary (30%): Zinc-100 components, subtle navigation sidebar and categories.
-Accent (10%): Vibrant Emerald Green (#10B981) for primary checkout CTA.
+Accent (10%): Vibrant Emerald Green (#059669) for primary checkout CTA.
 Layout Architecture: 3 columns (Sidebar 240px + Catalog Flex-1 + Order Summary 380px) — do NOT render mobile bottom bars or segmented controls in this variant.
 1. Left Sidebar (240px): Store brand 'Bodega San Pedro', cashier profile 'María Gómez', shift '8:00 AM - 4:00 PM', online green badge, navigation links with clean Lucide icons (POS Mostrador [active], Caja, Fiados, Inventario, Reportes), bottom admin button with PIN badge.
 2. Center Catalog Workspace (Flex-1):
@@ -360,7 +360,7 @@ Device: Tablet portrait viewport 768x1024px. This is the 768-1023px branch of th
 Design System: Shadcn UI clean light neutral, 60-30-10 color rule.
 Background (60%): Clean off-white/zinc-50 (#F4F4F5), pure white cards (#FFFFFF), crisp border-zinc-200.
 Secondary (30%): Zinc-100 components.
-Accent (10%): Vibrant Emerald Green (#10B981) for primary checkout CTA.
+Accent (10%): Vibrant Emerald Green (#059669) for primary checkout CTA.
 Layout Architecture: 2 panels visible (top app bar + catalog); drawer and ticket are overlays, not columns. Do NOT render a persistent 3-column desktop layout.
 1. Top Bar: Store brand 'Bodega San Pedro', hamburger menu button (drawer trigger), cashier 'María Gómez' + shift '8:00 AM - 4:00 PM', online green badge, search icon.
 2. Catalog Workspace (full width, one column under the top bar):
@@ -386,7 +386,7 @@ Device: Smartphone viewport 390x844px.
 Design System: Shadcn UI minimalist light aesthetic, 60-30-10 color rule.
 Background (60%): Clean off-white/zinc-50 (#F4F4F5), pure white surface cards (#FFFFFF), crisp border-zinc-200.
 Secondary (30%): Zinc-100 components, soft grey segmented control tabs.
-Accent (10%): Vibrant Emerald Green (#10B981) for primary CTA buttons.
+Accent (10%): Vibrant Emerald Green (#059669) for primary CTA buttons.
 Components to render:
 1. Header: Circular avatar with cashier initials 'MG', employee name 'María Gómez', shift 'Turno 8:00 am - 4:00 pm', green status badge 'En línea', wifi and settings icons.
 2. Segmented Control: 3 tabs ('Productos' [active/happy-path], 'Escáner' [best-effort], 'Teclado').
@@ -467,8 +467,8 @@ Palette:
 | text-primary | #18181B | text-zinc-900 | titles, main amounts |
 | text-secondary | #71717A | text-zinc-500 | subtitles, labels |
 | text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
-| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
-| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent |
+| accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
 | badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
 | badge-yape | #7C3AED | bg-purple-600 | Yape identity |
@@ -526,8 +526,8 @@ Palette:
 | text-primary | #18181B | text-zinc-900 | titles, main amounts |
 | text-secondary | #71717A | text-zinc-500 | subtitles, labels |
 | text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
-| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
-| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent |
+| accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
 | badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
 | badge-yape | #7C3AED | bg-purple-600 | Yape identity |
@@ -585,8 +585,8 @@ Palette:
 | text-primary | #18181B | text-zinc-900 | titles, main amounts |
 | text-secondary | #71717A | text-zinc-500 | subtitles, labels |
 | text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
-| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
-| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent |
+| accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
 | badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
 | badge-yape | #7C3AED | bg-purple-600 | Yape identity |
@@ -644,8 +644,8 @@ Palette:
 | text-primary | #18181B | text-zinc-900 | titles, main amounts |
 | text-secondary | #71717A | text-zinc-500 | subtitles, labels |
 | text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
-| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
-| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent |
+| accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
 | badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
 | badge-yape | #7C3AED | bg-purple-600 | Yape identity |
@@ -703,8 +703,8 @@ Palette:
 | text-primary | #18181B | text-zinc-900 | titles, main amounts |
 | text-secondary | #71717A | text-zinc-500 | subtitles, labels |
 | text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
-| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
-| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent |
+| accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
 | badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
 | badge-yape | #7C3AED | bg-purple-600 | Yape identity |
@@ -762,8 +762,8 @@ Palette:
 | text-primary | #18181B | text-zinc-900 | titles, main amounts |
 | text-secondary | #71717A | text-zinc-500 | subtitles, labels |
 | text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
-| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
-| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent |
+| accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
 | badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
 | badge-yape | #7C3AED | bg-purple-600 | Yape identity |
@@ -821,8 +821,8 @@ Palette:
 | text-primary | #18181B | text-zinc-900 | titles, main amounts |
 | text-secondary | #71717A | text-zinc-500 | subtitles, labels |
 | text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
-| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
-| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent |
+| accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
 | badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
 | badge-yape | #7C3AED | bg-purple-600 | Yape identity |
@@ -880,8 +880,8 @@ Palette:
 | text-primary | #18181B | text-zinc-900 | titles, main amounts |
 | text-secondary | #71717A | text-zinc-500 | subtitles, labels |
 | text-muted | #A1A1AA | text-zinc-400 | placeholders, separators |
-| accent-primary | #10B981 | bg-emerald-500 | 10% accent (primary CTA) |
-| accent-hover | #059669 | bg-emerald-600 | hover/active of primary |
+| accent-primary | #10B981 | bg-emerald-500 | 10% accent |
+| accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
 | badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
 | badge-yape | #7C3AED | bg-purple-600 | Yape identity |
