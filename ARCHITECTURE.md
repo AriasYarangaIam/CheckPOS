@@ -135,7 +135,7 @@ Validate at the API boundary. One error shape: `{ error: { code, message, detail
 | POST | `/cash-closes` | **required** | projection vs counted tenders; one per business date per tenant |
 | POST | `/stock-adjustments` | **required** | manual stock correction; signed delta |
 
-**Delta note — SDD stitch-admin-prompts (D12 DEFERRED).** El dashboard Admin (P4) renderiza SOLO el ledger local (IndexedDB, proyección F8) + `GET /fiado-accounts` (ADD-4): no se agrega ningún endpoint de reporte en esta versión. Delta futuro registrado: `GET /sales` o `GET /dashboard/summary` + tabla de asistencia (post-MVP, SPRINTS.md:39/:214). Sin endpoint agregado en este cambio.
+**Delta note — SDD stitch-admin-prompts (D12 DEFERRED).** El dashboard Admin (P4) renderiza SOLO el ledger local (IndexedDB, proyección F8) + `GET /fiado-accounts` (ADD-4): no se agrega ningún endpoint de reporte en esta versión. Delta futuro registrado: `GET /sales` o `GET /dashboard/summary` + tabla de asistencia (post-MVP, `SPRINTS.md` §6 y §11). Sin endpoint agregado en este cambio.
 
 ## Data ownership
 
