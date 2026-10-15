@@ -8,8 +8,19 @@ import { cn } from '@/lib/utils'
  * tokens de `docs/DESIGN.md` §2.1: el conectado/escaneo (acento), la merma y el
  * fiado (`badge-fiado`) y la identidad de los tenders digitales.
  *
- * El ámbar del fiado lleva texto primario en lugar de blanco: sobre `#F59E0B`
- * el blanco queda en 2.2:1 y no pasa AA, mientras que `#18181B` llega a 8.6:1.
+ * El texto del Badge es `text-caption-xs` (10px), que bajo WCAG 2.1 es texto
+ * normal: cada tono necesita 4,5:1, no los 3:1 del texto grande. El blanco solo
+ * se conserva sobre los fondos que lo admiten.
+ *
+ * - `fiado` y `accent` llevan texto primario: sobre el ámbar `#F59E0B` el
+ *   `#18181B` mide 8,25:1 y sobre el esmeralda `#10B981` mide 6,98:1, mientras
+ *   que el blanco se queda en 2,15:1 y 2,54:1.
+ * - `neutral` también lleva texto primario: sobre `#E4E4E7` el primario mide
+ *   13,96:1 y el secundario se quedaba en 3,81:1.
+ * - `plin` conserva el blanco porque el token `--color-badge-plin` bajó a
+ *   `#0369A1` (5,93:1); sobre el celeste anterior el blanco medía 4,10:1.
+ *
+ * `danger`, `yape`, `card` y `other` ya pasaban AA con blanco y no se tocan.
  */
 const badgeVariants = cva(
   [
@@ -20,8 +31,8 @@ const badgeVariants = cva(
   {
     variants: {
       tone: {
-        neutral: 'bg-surface-subtle text-text-secondary',
-        accent: 'bg-accent-primary text-white',
+        neutral: 'bg-surface-subtle text-text-primary',
+        accent: 'bg-accent-primary text-text-primary',
         danger: 'bg-danger-action text-white',
         fiado: 'bg-badge-fiado text-text-primary',
         yape: 'bg-badge-yape text-white',

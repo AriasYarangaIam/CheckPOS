@@ -48,7 +48,7 @@ const PALETTE_CASES: TokenCase[] = [
   { token: 'danger-action', hex: '#e11d48' },
   { token: 'badge-fiado', hex: '#f59e0b' },
   { token: 'badge-yape', hex: '#7c3aed' },
-  { token: 'badge-plin', hex: '#0284c7' },
+  { token: 'badge-plin', hex: '#0369a1' },
   { token: 'badge-card', hex: '#2563eb' },
   { token: 'badge-other', hex: '#52525b' },
 ]

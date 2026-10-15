@@ -1,7 +1,10 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { Badge } from '@/components/ui/Badge'
+import { Badge, badgeVariants, type BadgeProps } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import {
@@ -12,6 +15,85 @@ import {
   DialogTrigger,
 } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
+
+type BadgeTone = NonNullable<BadgeProps['tone']>
+
+/*
+ * Contraste de los tonos del Badge. El texto del Badge es `text-caption-xs`
+ * (10px), es decir texto normal bajo WCAG 2.1: el umbral es 4,5:1, no los 3:1
+ * del texto grande, así que ningún tono puede quedar por debajo. Los colores no
+ * se copian acá: se resuelven contra `src/index.css` (la capa de tokens) y
+ * contra las clases que el propio `cva` emite, de modo que un tono que pierda
+ * contraste falle en la suite y no en una revisión visual.
+ *
+ * El entorno jsdom no deja una base de URL utilizable para llegar al sistema de
+ * archivos, así que la raíz se toma de `process.cwd()` (la raíz de Vite), con el
+ * segundo candidato para la corrida lanzada desde la raíz del repositorio.
+ */
+function tokenSource(): string {
+  const candidates = [join(process.cwd(), 'src'), join(process.cwd(), 'web', 'src')]
+  const found = candidates.find((candidate) => existsSync(join(candidate, 'index.css')))
+
+  if (found === undefined) {
+    throw new Error(`No se encontró el árbol de fuentes de la PWA (cwd: ${process.cwd()})`)
+  }
+
+  return readFileSync(join(found, 'index.css'), 'utf8')
+}
+
+/** `#rrggbb` de la custom property `--color-<token>` declarada en `@theme`. */
+function colorToken(css: string, token: string): string | undefined {
+  const match = css.match(new RegExp(`--color-${token}:\\s*(#[0-9A-Fa-f]{3,8})\\s*;`))
+
+  return match?.[1].toLowerCase()
+}
+
+/** `text-white` sale de la escala por defecto de Tailwind, no del contrato. */
+const TAILWIND_WHITE = '#ffffff'
+
+/**
+ * Valor de la primera utilidad con ese prefijo cuyo sufijo sea un token de color
+ * de la capa de diseño. El filtro importa: `badgeVariants` emite además
+ * `text-caption-xs`, que comparte prefijo con las utilidades de color sin serlo.
+ */
+function resolvedColor(css: string, classes: string, prefix: 'bg-' | 'text-'): string {
+  for (const candidate of classes.split(/\s+/)) {
+    if (!candidate.startsWith(prefix)) continue
+
+    const token = candidate.slice(prefix.length)
+
+    if (token === 'white') return TAILWIND_WHITE
+
+    const value = colorToken(css, token)
+
+    if (value !== undefined) return value
+  }
+
+  throw new Error(`El tono no declara ninguna utilidad de color ${prefix}*: ${classes}`)
+}
+
+/** Luminancia relativa de WCAG 2.1 sobre un `#rrggbb` en sRGB. */
+function relativeLuminance(hex: string): number {
+  const linear = [1, 3, 5].map((offset) => {
+    const channel = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255
+
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
+
+  const [red = 0, green = 0, blue = 0] = linear
+
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+}
+
+/** Ratio de contraste de dos colores opacos (WCAG 2.1): de 1:1 a 21:1. */
+function contrastRatio(background: string, foreground: string): number {
+  const backgroundLuminance = relativeLuminance(background)
+  const foregroundLuminance = relativeLuminance(foreground)
+  const lighter = Math.max(backgroundLuminance, foregroundLuminance)
+  const darker = Math.min(backgroundLuminance, foregroundLuminance)
+
+  return (lighter + 0.05) / (darker + 0.05)
+}
 
 describe('Button', () => {
   it('renders its label as a button', () => {
@@ -69,6 +151,24 @@ describe('Card', () => {
   })
 })
 
+/*
+ * Inventario exhaustivo por construcción: `Record<BadgeTone, true>` obliga a que
+ * todo tono declarado en el `cva` tenga su fila acá — si el primitivo suma un
+ * tono, `tsc` falla en esta tabla hasta que el tono entre a la verificación.
+ */
+const TONE_CONTRAST_TABLE: Record<BadgeTone, true> = {
+  neutral: true,
+  accent: true,
+  danger: true,
+  fiado: true,
+  yape: true,
+  plin: true,
+  card: true,
+  other: true,
+}
+
+const BADGE_TONES = Object.keys(TONE_CONTRAST_TABLE) as BadgeTone[]
+
 describe('Badge', () => {
   it('renders a status label', () => {
     render(<Badge tone="accent">En línea</Badge>)
@@ -86,6 +186,18 @@ describe('Badge', () => {
 
     expect(badge.className).toContain('bg-badge-fiado')
     expect(badge.className).toContain('text-text-primary')
+  })
+
+  it.each(BADGE_TONES)('keeps the %s tone at or above 4,5:1', (tone) => {
+    const css = tokenSource()
+    const classes = badgeVariants({ tone })
+
+    const ratio = contrastRatio(
+      resolvedColor(css, classes, 'bg-'),
+      resolvedColor(css, classes, 'text-'),
+    )
+
+    expect(ratio).toBeGreaterThanOrEqual(4.5)
   })
 })
 
