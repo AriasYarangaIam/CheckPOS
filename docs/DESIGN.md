@@ -44,7 +44,7 @@ Este sistema de tokens está estructurado para integrarse nativamente con **Goog
 | `text-secondary` | `#71717A` | `text-zinc-500` | Subtítulos, horas de turno, etiquetas |
 | `text-muted` | `#A1A1AA` | `text-zinc-400` | Placeholders, separadores secundarios |
 | `accent-primary` | `#10B981` | `bg-emerald-500` | Acento (10%): esquinas del visor, anillos de foco y acentos de éxito |
-| `accent-hover` | `#059669` | `bg-emerald-600` | Fondo del botón `COBRAR`: el único paso del acento que admite texto blanco con contraste AA |
+| `accent-hover` | `#059669` | `bg-emerald-600` | Fondo del botón `COBRAR`: el único paso del acento que admite texto blanco con contraste AA, y solo como texto grande (3,77:1 ≥ 3:1, pero < 4,5:1); en los tamaños por debajo de 18,66px en negrita el mismo relleno lleva `text-primary` (4,70:1) |
 | `accent-glow` | `rgba(16,185,129,0.3)` | `shadow-emerald-500/30` | Resplandor de elevación del botón principal |
 | `badge-fiado` | `#F59E0B` | `bg-amber-500` / `text-zinc-900` | Módulo de cuentas corrientes / fiados: el texto es `text-primary` (8,25:1); el ámbar oscuro como texto sobre este fondo se queda en 2,34:1 y no alcanza AA |
 | `badge-yape` | `#7C3AED` | `bg-violet-600` | Identidad billeteras digitales QR (Yape) |

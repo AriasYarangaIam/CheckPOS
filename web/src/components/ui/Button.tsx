@@ -8,6 +8,26 @@ import { cn } from '@/lib/utils'
  * `scale(0.98)` con `transition: transform 120ms ease-out`. La transición se
  * declara solo sobre `transform`; `transition: all` está prohibido en todo el
  * sistema (docs/FRONTEND.md:20).
+ *
+ * Contraste (docs/DESIGN.md §2.1:47 y el CTA `COBRAR` de §1.3:153): el relleno
+ * del botón principal es `accent-hover` (`#059669`), no `accent-primary`. Sobre
+ * `#10B981` el blanco mide 2,54:1 y no alcanza AA ni para texto grande; sobre
+ * `#059669` mide 3,77:1, que sí es AA para texto grande, pero no llega a los
+ * 4,5:1 del texto normal. En esta escala solo `cta` es texto grande
+ * (`text-heading-md`, 20px/700 ≥ 18,66px en negrita): `sm` (`text-body-sm`,
+ * 12px/500) y `md` (`text-body-md`, 14px/600) son texto normal y ambos llevan
+ * `text-primary` (`#18181B`, 4,70:1 sobre el mismo relleno) vía
+ * `compoundVariants`. El resplandor de elevación sigue siendo el de §2.1:48 y
+ * §2.3:77 (`shadow-glow-emerald`). El hover repite el relleno en lugar de
+ * cambiarlo, porque §1.3:153 fija que «el estado hover/active conserva el
+ * relleno»: ningún escalón del acento queda expuesto con la tinta equivocada.
+ *
+ * `danger` conserva `danger-action` en reposo (blanco: 4,70:1) y baja el hover
+ * a `rose-700`: blanco sobre `rose-500` (`#F43F5E`) mide 3,67:1 y se queda corto
+ * para el texto normal de `sm` y `md`; sobre `rose-700` (`#BE123C`) mide 6,29:1
+ * y mantiene el matiz que el contrato ya usa para este token (§2.1:54,
+ * `bg-rose-600`). `secondary` y `ghost` no cambian: sobre `surface-subtle`
+ * (`#E4E4E7`) el `text-primary` mide 13,96:1.
  */
 const buttonVariants = cva(
   [
@@ -21,12 +41,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // El acento 10% con su resplandor de elevación es el rol del botón
-        // principal (docs/DESIGN.md §2.1:46-48, §2.3:77).
-        primary: 'bg-accent-primary text-white shadow-glow-emerald hover:bg-accent-hover',
+        primary: 'bg-accent-hover text-white shadow-glow-emerald hover:bg-accent-hover',
         secondary: 'border border-surface-border bg-surface-subtle text-text-primary hover:bg-zinc-200',
         ghost: 'text-text-primary hover:bg-surface-subtle',
-        danger: 'bg-danger-action text-white hover:bg-rose-500',
+        danger: 'bg-danger-action text-white hover:bg-rose-700',
       },
       size: {
         sm: 'h-9 px-3 text-body-sm',
@@ -35,6 +53,14 @@ const buttonVariants = cva(
         cta: 'h-[52px] px-6 text-heading-md',
       },
     },
+    compoundVariants: [
+      // Blanco sobre `#059669` mide 3,77:1: alcanza AA solo como texto grande,
+      // así que la regla se limita a los dos tamaños de texto normal. El
+      // compuesto va al final de la cadena del `cva` y `cn` conserva la última
+      // utilidad de cada grupo, de modo que reemplaza al `text-white` del rol
+      // primario.
+      { variant: 'primary', size: ['sm', 'md'], class: 'text-text-primary' },
+    ],
     defaultVariants: {
       variant: 'primary',
       size: 'md',

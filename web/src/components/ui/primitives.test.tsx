@@ -5,7 +5,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { Badge, badgeVariants, type BadgeProps } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariants, type ButtonProps } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import {
   Dialog,
@@ -15,8 +15,11 @@ import {
   DialogTrigger,
 } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
+import { cn } from '@/lib/utils'
 
 type BadgeTone = NonNullable<BadgeProps['tone']>
+type ButtonVariant = NonNullable<ButtonProps['variant']>
+type ButtonSize = NonNullable<ButtonProps['size']>
 
 /*
  * Contraste de los tonos del Badge. El texto del Badge es `text-caption-xs`
@@ -48,23 +51,54 @@ function colorToken(css: string, token: string): string | undefined {
   return match?.[1].toLowerCase()
 }
 
-/** `text-white` sale de la escala por defecto de Tailwind, no del contrato. */
-const TAILWIND_WHITE = '#ffffff'
+/**
+ * Escalones de la paleta por defecto de Tailwind que usan los primitivos y que
+ * no viven en la capa de tokens de `src/index.css`. No se derivan de
+ * `theme.css`: Tailwind v4 los declara en `oklch()` y su conversión a sRGB cae
+ * fuera de gamut (`rose-700` daría `#C70036` en lugar de `#BE123C`), así que se
+ * fija el hex publicado de cada escalón.
+ */
+const TAILWIND_PALETTE: Record<string, string> = {
+  white: '#ffffff',
+  'zinc-200': '#e4e4e7',
+  'rose-700': '#be123c',
+}
 
 /**
- * Valor de la primera utilidad con ese prefijo cuyo sufijo sea un token de color
- * de la capa de diseño. El filtro importa: `badgeVariants` emite además
- * `text-caption-xs`, que comparte prefijo con las utilidades de color sin serlo.
+ * Color de una utilidad suelta, o `undefined` si no es una utilidad de color.
+ * El segundo caso importa: `text-body-md` comparte prefijo con las utilidades
+ * de color sin serlo.
  */
+function utilityColor(css: string, utility: string): string | undefined {
+  const token = utility.slice(utility.lastIndexOf(':') + 1)
+  const prefix = token.startsWith('bg-') ? 'bg-' : token.startsWith('text-') ? 'text-' : undefined
+
+  if (prefix === undefined) return undefined
+
+  const name = token.slice(prefix.length)
+
+  return TAILWIND_PALETTE[name] ?? colorToken(css, name)
+}
+
+/**
+ * Color del token `--color-<token>`; falla si el contrato dejó de declararlo.
+ */
+function requiredToken(css: string, token: string): string {
+  const value = colorToken(css, token)
+
+  if (value === undefined) {
+    throw new Error(`El contrato no declara la custom property --color-${token}`)
+  }
+
+  return value
+}
+
+/** Primera utilidad de color con ese prefijo, resuelta a su valor. */
 function resolvedColor(css: string, classes: string, prefix: 'bg-' | 'text-'): string {
   for (const candidate of classes.split(/\s+/)) {
     if (!candidate.startsWith(prefix)) continue
 
-    const token = candidate.slice(prefix.length)
-
-    if (token === 'white') return TAILWIND_WHITE
-
-    const value = colorToken(css, token)
+    const value = utilityColor(css, candidate)
 
     if (value !== undefined) return value
   }
@@ -132,6 +166,186 @@ describe('Button', () => {
     render(<Button size="cta">COBRAR</Button>)
 
     expect(screen.getByRole('button', { name: 'COBRAR' }).className).toContain('h-[52px]')
+  })
+})
+
+/*
+ * Contraste del Button: variante × tamaño × estado. El rol principal es el que
+ * fallaba —blanco sobre `#10B981` mide 2,54:1—, pero la tabla cubre los cuatro
+ * roles para que la próxima variante no nazca sin verificación.
+ */
+
+const BUTTON_STATES = ['rest', 'hover'] as const
+
+type ButtonState = (typeof BUTTON_STATES)[number]
+
+/**
+ * Utilidades de color de un estado: en reposo las que no llevan prefijo de
+ * variante, en hover las que sí. `focus-visible:` y `disabled:` no entran: no
+ * cambian ni la tinta ni el relleno que se está midiendo.
+ */
+function stateUtilities(classes: string, prefix: 'bg-' | 'text-', state: ButtonState): string[] {
+  const selector = state === 'hover' ? `hover:${prefix}` : prefix
+
+  return classes
+    .split(/\s+/)
+    .filter((candidate) => candidate.startsWith(selector))
+    .map((candidate) => candidate.slice(candidate.lastIndexOf(':') + 1))
+}
+
+/**
+ * Colores que un estado pinta con ese prefijo, resueltos contra los tokens y sin
+ * repetir. El conjunto es la unidad de verificación: la fusión de `cn` tiene que
+ * dejar exactamente una utilidad viva por grupo.
+ */
+function stateColors(
+  css: string,
+  classes: string,
+  prefix: 'bg-' | 'text-',
+  state: ButtonState,
+): string[] {
+  const colors = stateUtilities(classes, prefix, state)
+    .map((utility) => utilityColor(css, utility))
+    .filter((color): color is string => color !== undefined)
+
+  return [...new Set(colors)]
+}
+
+/**
+ * Par efectivo de un estado: si no declara color propio, hereda el del reposo
+ * —igual que CSS con una utilidad `hover:` ausente—; si declara, tiene que ser
+ * uno solo, porque `cn` ya fusionó los conflictos antes de llegar acá.
+ */
+function effectiveColors(
+  css: string,
+  classes: string,
+  prefix: 'bg-' | 'text-',
+  state: ButtonState,
+): string[] {
+  const declared = stateColors(css, classes, prefix, state)
+
+  return declared.length > 0 ? declared : stateColors(css, classes, prefix, 'rest')
+}
+
+/**
+ * Umbral WCAG 2.1 por clase tipográfica del tamaño (docs/DESIGN.md §2.2):
+ * `text-heading-md` son 20px con peso 700, el único tamaño de la escala de
+ * botones que supera el piso de «texto grande» (≥18,66px en negrita). `sm`
+ * (`text-body-sm`, 12px/500) y `md` (`text-body-md`, 14px/600) son texto normal.
+ */
+const SIZE_MIN_RATIO: Record<ButtonSize, number> = {
+  sm: 4.5,
+  md: 4.5,
+  cta: 3.0,
+}
+
+/** La tinta que el contrato exige sobre el relleno de cada par variante×tamaño. */
+type ButtonInk = 'text-white' | 'text-text-primary'
+
+/**
+ * Inventario exhaustivo por construcción: `Record<ButtonVariant, Record<ButtonSize, …>>`
+ * obliga a que toda variante y todo tamaño declarados en el `cva` tengan su fila
+ * acá. Si el primitivo suma una variante o un tamaño, `tsc` falla en esta tabla
+ * hasta que entren a la verificación.
+ */
+const BUTTON_INK: Record<ButtonVariant, Record<ButtonSize, ButtonInk>> = {
+  primary: { sm: 'text-text-primary', md: 'text-text-primary', cta: 'text-white' },
+  secondary: { sm: 'text-text-primary', md: 'text-text-primary', cta: 'text-text-primary' },
+  ghost: { sm: 'text-text-primary', md: 'text-text-primary', cta: 'text-text-primary' },
+  danger: { sm: 'text-white', md: 'text-white', cta: 'text-white' },
+}
+
+/**
+ * `ghost` no declara relleno: se pinta sobre la superficie que lo contiene, y
+ * las dos superficies del sistema (§2.1:39-40) entran a la verificación. Los
+ * demás roles traen su propio fondo y dejan la lista vacía.
+ */
+const BUTTON_BACKDROPS: Record<ButtonVariant, readonly string[]> = {
+  primary: [],
+  secondary: [],
+  ghost: ['surface-bg', 'surface-card'],
+  danger: [],
+}
+
+const BUTTON_CASES: Array<[ButtonVariant, ButtonSize]> = (
+  Object.keys(BUTTON_INK) as ButtonVariant[]
+).flatMap((variant) =>
+  (Object.keys(BUTTON_INK[variant]) as ButtonSize[]).map(
+    (size): [ButtonVariant, ButtonSize] => [variant, size],
+  ),
+)
+
+describe('Button contrast', () => {
+  it('fills the primary CTA with the corrected contract step', () => {
+    // El contrato movió el relleno a `accent-hover` porque el blanco sobre
+    // `#10B981` mide 2,54:1. Si el componente vuelve a `accent-primary`, este
+    // caso lo detiene sin depender del ojo de quien revisa.
+    const classes = cn(buttonVariants({ variant: 'primary', size: 'cta' }))
+
+    expect(classes).toContain('bg-accent-hover')
+    expect(classes).not.toContain('bg-accent-primary')
+  })
+
+  it('lets cn collapse the ink conflict that the cva leaves open', () => {
+    // En `sm` y `md` el `cva` emite las dos tintas a propósito —`text-white`
+    // del rol y `text-text-primary` del compuesto—, y la fusión de `cn` tiene
+    // que dejar viva la última. Sin esa fusión el navegador aplicaría la que
+    // gane por orden de la hoja de estilos, no por la última declarada.
+    const mdRaw = buttonVariants({ variant: 'primary', size: 'md' })
+    const mdFused = cn(mdRaw)
+
+    expect(mdRaw).toContain('text-white')
+    expect(mdRaw).toContain('text-text-primary')
+    expect(mdFused).not.toContain('text-white')
+    expect(mdFused).toContain('text-text-primary')
+
+    // En `cta` el compuesto no aplica y el blanco sobrevive como única tinta.
+    const ctaFused = cn(buttonVariants({ variant: 'primary', size: 'cta' }))
+
+    expect(ctaFused).toContain('text-white')
+    expect(ctaFused).not.toContain('text-text-primary')
+  })
+
+  it.each(BUTTON_CASES)('keeps %s/%s at AA in every state', (variant, size) => {
+    const css = tokenSource()
+    // La cadena que llega al DOM es la que sale de `cn`: `tailwind-merge`
+    // resuelve el conflicto entre la tinta del rol y la del compuesto, así que
+    // la verificación se hace sobre la salida fusionada y no sobre la cruda del
+    // `cva`, que a propósito trae las dos.
+    const classes = cn(buttonVariants({ variant, size }))
+    const minRatio = SIZE_MIN_RATIO[size]
+
+    for (const state of BUTTON_STATES) {
+      const inks = effectiveColors(css, classes, 'text-', state)
+
+      // Exactamente una tinta viva, y la correcta. Si `cn` dejara las dos, o
+      // ganara la equivocada, el umbral de `sm` y `md` también falla: blanco
+      // sobre `#059669` mide 3,77:1.
+      expect(inks, `tintas de ${variant}/${size} en ${state}`).toHaveLength(1)
+      expect(inks[0]).toBe(utilityColor(css, BUTTON_INK[variant][size]))
+
+      const declaredFills = stateColors(css, classes, 'bg-', state)
+      const backdrops = BUTTON_BACKDROPS[variant]
+
+      // Un rol con relleno propio declara exactamente uno por estado.
+      if (backdrops.length === 0) {
+        expect(declaredFills, `rellenos de ${variant}/${size} en ${state}`).toHaveLength(1)
+      }
+
+      const fills =
+        declaredFills.length > 0
+          ? declaredFills
+          : backdrops.map((token) => requiredToken(css, token))
+
+      expect(fills.length).toBeGreaterThan(0)
+
+      for (const fill of fills) {
+        expect(
+          contrastRatio(fill, inks[0]),
+          `${variant}/${size} en ${state}: ${inks[0]} sobre ${fill}`,
+        ).toBeGreaterThanOrEqual(minRatio)
+      }
+    }
   })
 })
 
