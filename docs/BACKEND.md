@@ -623,6 +623,55 @@ El hecho de que `pos_app` no tenga `DELETE` sobre ninguna tabla de negocio es lo
 
 La sincronización es bidireccional: POST idempotente hacia arriba (ids UUIDv7 del cliente + protocolo de claim) y pull por cursor hacia abajo. La reconciliación es **silenciosa**: el POS nunca muestra errores de sincronización al cajero (`ARCHITECTURE.md:24`; `docs/DATABASE.md` §7.9). Esta sección convierte ese enunciado en obligaciones explícitas del servidor.
 
+**Secuencia del ciclo offline.** Cierre offline → reintento → POST duplicado → ack, con la rama de reconciliación silenciosa del lado servidor:
+
+```
+   POS PWA (cliente)                              Servidor
+        │
+        │  (1) Cierre offline: no hay red. La operación se encola
+        │      con su clave K y el cajero recibe confirmación local
+        │      de inmediato.
+        │
+        │  (2) Vuelve la red  →  flush de la cola
+        ├─── POST /cash-closes · Idempotency-Key: K ─────────────▶
+        │                                     · INSERT del claim con
+        │                                       ON CONFLICT (tenant_id, key)
+        │                                     · rowcount 1 = Rama B
+        │                                     · escritura de negocio + COMMIT
+        │                                       todo-o-nada
+        │◀── 200 · respuesta almacenada ──────────────────────────
+        │
+        │  (3) ack: la operación se marca completa y sale de la cola.
+        │
+        │  (4) Reintento con LA MISMA clave K (el ack se perdió)
+        ├─── POST /cash-closes · Idempotency-Key: K ─────────────▶
+        │                                     · rowcount 0 = Rama A
+        │                                     · compara payload_hash
+        │                                     · igual    → 200 almacenado
+        │                                     · distinto → 422
+        │◀── 200 · reintento absorbido, 0 escrituras de negocio ──
+        │
+        │  (5) Duplicado concurrente: dos POST con la misma clave
+        ├─── POST (K, en vuelo) ────────────────────────────────▶ gana el INSERT
+        ├─── POST (K, duplicado) ───────────────────────────────▶ bloquea en la UNIQUE
+        │                                     · la ganadora confirma dentro del
+        │                                       lock timeout → la perdedora relee
+        │                                       el claim y devuelve el 200
+        │                                     · no confirma a tiempo →
+        │                                       409 + Retry-After
+        │◀── 200 (absorbido)  ó  409 + Retry-After ───────────────
+        │
+        │  (6) Violación única inbound (nombre, GTIN, cierre duplicado)
+        ├─── POST ──────────────────────────────────────────────▶
+        │◀── 200 con la fila resuelta (§6.9) ─────────────────────
+        │
+        ▼  (7) RECONCILIACIÓN SILENCIOSA
+           El POS marca la operación como completa con la fila que
+           devolvió el servidor. El cajero **nunca** ve un error de
+           sincronización, ni un prompt, ni un reintento manual
+           (`ARCHITECTURE.md:24`; `docs/DATABASE.md` §7.7, §7.9).
+```
+
 ### 6.1 Protocolo de claim, paso a paso
 
 Toda petición encolable lleva una clave de idempotencia: el par `(tenant_id, key)`. La fila `idempotency_keys` **es** el claim. El protocolo tiene tres ramas, todas dentro de una sola transacción (`docs/DATABASE.md` §7.1):
