@@ -1,0 +1,35 @@
+# Local PostgreSQL for the Sprint 1 database layer of the POS SaaS (bodegas/minimarkets).
+#
+# Start:  docker compose up -d
+# Apply:  go run ./cmd/migrate up        (see README.md, section "Sprint 1")
+#
+# The host port is 5433, not 5432: something else on this machine already listens on
+# 5432 (`Test-NetConnection -ComputerName localhost -Port 5432` returns True), and
+# 5433 was verified free. Change the published port below if 5433 is taken on yours.
+#
+# The credentials below are throwaway local-development values, never secrets.
+
+name: pos-system-saas
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: pos-system-saas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pos
+      POSTGRES_PASSWORD: pos_local_dev
+      POSTGRES_DB: pos
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pos -d pos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata:
