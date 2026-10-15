@@ -1,86 +1,69 @@
-# POS SaaS (CheckPOS)
+# CheckPOS — Punto de venta SaaS para bodegas y minimarkets
 
-Point-of-sale SaaS for bodegas and minimarkets. The design documents live in `docs/`;
-`docs/DATABASE.md` is the authoritative PostgreSQL schema contract.
+CheckPOS es una plataforma de Punto de Venta (POS) pensada para el comercio barrial peruano: bodegas, minimarkets y tiendas de conveniencia. Registra ventas, cobros y fiados, y **sigue operando cuando se corta el internet**.
 
-This repository currently contains the **Sprint 1 database layer**: a local PostgreSQL
-container, the goose migration runner, and the initial migration set that creates the
-14 tables of the schema contract.
+Su premisa es una sola: cero fricción tecnológica. El negocio no necesita comprar hardware dedicado, ni cargar su inventario completo antes de empezar, ni capacitarse para vender.
 
-## Sprint 1 — start the database and apply the migrations
+## Qué resuelve
 
-### 1. Start PostgreSQL
+| Problema del negocio | Cómo lo resuelve |
+| --- | --- |
+| **Fiados desordenados.** Se anotan en libretas que se pierden y nadie recuerda quién debe ni cuánto. | Cuentas corrientes con registro del deudor en dos toques, historial de abonos parciales y saldo siempre calculado a partir de los movimientos. |
+| **Colapso en la hora punta.** Teclear códigos o buscar en listas hace lenta la atención. | Venta de mostrador en menos de tres segundos, por código de barras o con botones de un solo toque para los productos sin código. |
+| **La barrera del inventario inicial.** Cargar cientos de productos a mano desanima antes de la primera venta. | Catálogo maestro precargado en el dispositivo: al escanear un producto por primera vez se autocompletan nombre, marca y foto, y el comerciante solo define precio y stock. |
+| **Descuadres al cerrar el día.** Se mezclan el efectivo en caja, las billeteras digitales y las tarjetas. | Cuadre de caja por método de cobro, con la diferencia entre lo esperado y lo contado a la vista al cerrar el turno. |
+| **Cortes de internet y fallas eléctricas.** El sistema se cae justo cuando más se vende. | Funcionamiento sin conexión: la venta se registra en el dispositivo y se sincroniza sola en cuanto vuelve la red, sin interrumpir la atención. |
+
+## Para quién
+
+Comerciantes de micro-retail y comercio barrial tradicional —bodegueros, dueños de tiendas de abarrotes, minimarkets y tiendas de conveniencia— y sus empleados o cajeros.
+
+El mismo producto se adapta a dos perfiles de negocio:
+
+- **Bodega tradicional:** funciona con el teléfono del propio comerciante, sin inversión en hardware adicional.
+- **Minimarket o tienda consolidada:** estación de mostrador con lector de códigos, impresora térmica y cajón de dinero.
+
+## Características principales
+
+- Interfaz mobile-first, operable con una sola mano, con teclado numérico ergonómico y vuelto en pantalla completa.
+- Escaneo por la cámara del teléfono, con la grilla de productos favoritos como camino principal y nunca como paso obligatorio.
+- Operación sin conexión: la venta continúa y la sincronización ocurre en segundo plano.
+- Cuentas corrientes (fiados) con registro rápido, abonos parciales y alertas de deuda.
+- Cuadre de caja por método de cobro al cierre del turno.
+- Instalable como aplicación web progresiva (PWA).
+
+## Estado del proyecto
+
+El MVP está en construcción. Su alcance y su contrato técnico están congelados, y la implementación avanza por sprints de una semana.
+
+Lo que existe hoy en el repositorio es la base del sistema: la base de datos local en contenedor con las catorce tablas del contrato de esquema, el proceso del servidor con sus sondas de estado, y el andamiaje de la aplicación web con su entorno de pruebas.
+
+La documentación de arquitectura y la puesta en marcha completa se agregarán a este documento cuando el incremento esté cerrado.
+
+## Documentación de referencia
+
+Los contratos y planes del proyecto viven en `docs/`:
+
+| Documento | Contenido |
+| --- | --- |
+| `ARCHITECTURE.md` | Contrato de arquitectura del sistema |
+| `docs/DATABASE.md` | Contrato de esquema de la base de datos |
+| `docs/BACKEND.md` | Plan de implementación del servidor |
+| `docs/FRONTEND.md` | Plan de implementación de la interfaz |
+| `docs/DESIGN.md` | Sistema de diseño e interfaz |
+| `docs/PRODUCT.md` | Definición de producto |
+| `docs/BUSINESS.md` | Contenido comercial |
+| `SPRINTS.md` | Plan de entrega por sprints |
+
+## Puesta en marcha (provisional)
+
+> Sección provisoria. Se completará cuando el incremento esté cerrado.
+
+Con Docker y Go instalados, levantar la base local y aplicar las migraciones:
 
 ```powershell
 docker compose up -d
-docker compose ps
+go run ./cmd/migrate up
 ```
 
-The container is ready when `docker compose ps` reports `(healthy)`.
-
-The published host port is **5433**, not 5432: another service on the development
-machine already listens on 5432, and 5433 was verified free. If 5433 is taken on your
-machine, change the published port in `docker-compose.yml` and update `DATABASE_URL`.
-
-### 2. Apply the migrations
-
-```powershell
-go run ./cmd/migrate up        # apply every pending migration
-go run ./cmd/migrate status    # list applied and pending migrations
-go run ./cmd/migrate ping      # connectivity smoke test: server version + table count
-go run ./cmd/migrate down      # reverse the whole schema (down to version 0)
-```
-
-`make` is not required, and is not assumed to exist on Windows. The migration runner is
-a plain Go program; the SQL files are compiled into it with `embed.FS`, so no external
-goose binary is needed either.
-
-The connection string is read from `DATABASE_URL`. Copy `.env.example` to `.env` to
-override the default:
-
-```
-postgres://pos:pos_local_dev@localhost:5433/pos?sslmode=disable
-```
-
-Those credentials are throwaway local-development values, not secrets. `.env` is
-git-ignored.
-
-### 3. Migration layout
-
-Migrations are goose SQL files in `migrations/`, applied in filename order, one module
-per file so a reviewer can read one module group at a time:
-
-| File | Module group (`docs/DATABASE.md` §4) | Tables |
-|------|--------------------------------------|--------|
-| `20261015000001_identity.sql` | Identity | `tenants`, `users`, `devices` |
-| `20261015000002_global_catalog.sql` | Platform-curated global | `global_products`, `global_barcodes` |
-| `20261015000003_catalog.sql` | Catalog (tenant) | `products`, `stock_adjustments` |
-| `20261015000004_ledger.sql` | Ledger | `sales` (partitioned), `sale_lines` |
-| `20261015000005_fiado.sql` | Fiado | `fiado_accounts`, `fiado_movements` |
-| `20261015000006_cash_close.sql` | Cash close | `cash_closes`, `cash_close_counts` |
-| `20261015000007_sync.sql` | Sync/API | `idempotency_keys` |
-
-Two ordering notes, both about migration mechanics rather than the contract:
-
-- the global catalog file is applied second because `products.global_product_id`
-  references `global_products.id`;
-- `stock_adjustments`' composite foreign key to `sales` is added at the end of the
-  ledger file, because `sales` does not exist when the catalog file runs.
-
-`sales` is RANGE-partitioned by month on `sold_on`. The migration pre-creates the
-current month plus the next six as `sales_YYYY_MM`, plus a `sales_default` DEFAULT
-partition as a safety net. Rolling pre-creation is a scheduled maintenance concern
-(`docs/DATABASE.md` §6.3); extending the window today means adding a migration with
-more `CREATE TABLE ... PARTITION OF` statements.
-
-Row-level security is **not** part of Sprint 1 — the migration creates tables only.
-FORCE RLS, the tenant-context GUC and the grant matrix are Sprint 2 work
-(`docs/DATABASE.md` §5).
-
-### 4. Useful SQL without a local client
-
-There is no `psql` client installed locally; run SQL through the container:
-
-```powershell
-docker compose exec postgres psql -U pos -d pos -c "\dt"
-```
+El puerto publicado es **5433** y no 5432, porque 5432 ya estaba ocupado en la máquina de desarrollo. Las credenciales del contenedor son valores de desarrollo local, no secretos.

@@ -276,12 +276,12 @@ A sellable item in one tenant's catalog. Carries its own identity, price, stock 
 **Decision trace**: decision 2 (JSONB boundary — attributes is home #1); decision 8 (LWW = client mutation-time); OI-7 (tombstones); OI-10 (no stock >= 0 CHECK); OI-11 (RESTRICT FK on products referenced by sale_lines); F13 (adoption rule); MD-11 (stock/updated_at interaction).
 **Adoption rule (F13)**: when a tenant adopts a global product, the server copies the global row's data into the tenant's columns (name, gtin, uom, attributes) at adoption time and sets global_product_id. After adoption the tenant row is self-owned — edits to the tenant row do not propagate back to the global row, and edits to the global row do not propagate to adopted tenant rows. The pointer is lineage, never a live dependency.
 
-**Delta note — SDD stitch-admin-prompts (D11 DEFERRED; docs-only, NO DDL).** La pantalla de catálogo (P8) NO renderiza columna de márgenes ni alertas de costo (ADCt-4.1): `products` no tiene `cost_cents` (:234-249) y "net profit"/compras son epics Later (SPRINTS.md:215; fuera de esta versión, §9 :825). Delta futuro registrado:
+**Delta note — SDD stitch-admin-prompts (D11 DEFERRED; docs-only, NO DDL).** La pantalla de catálogo (P8) NO renderiza columna de márgenes ni alertas de costo (ADCt-4.1): `products` no tiene `cost_cents` (:234-249) y "net profit"/compras son epics Later (SPRINTS.md §11; fuera de esta versión, §9 :825). Delta futuro registrado:
 
 ```text
 products.cost_cents BIGINT NULL     -- + campo PATCH aditivo + cálculo de margen comercial;
                                     --  la gestión de precio (price_cents) SÍ está en scope (ADCt-2.3);
-                                    --  purchases/suppliers y net profit: Later epics (SPRINTS.md:215, :825)
+                                    --  purchases/suppliers y net profit: Later epics (SPRINTS.md §11, :825)
 ```
 
 La gestión de precios (price_cents) sigue siendo la única edición de precio en esta versión.
@@ -499,7 +499,7 @@ One close per business date per tenant (D10). Header row carrying the close meta
 
 **Decision trace**: OI-2 (UUIDv7 client-generated); D10 (UNIQUE (tenant_id, closed_on) — one close per business date per tenant; repeat closes deferred); D11 (close-report reading: expected fiado = credit extended, counted fiado = 0, difference informational); F8 (expected-projection formula); F37 (queued duplicate-date close → silent no-op; pointer to Section 7).
 
-**Delta note — SDD stitch-admin-prompts (D10 DEFERRED; docs-only, NO DDL).** La pantalla de cierre (P5) omite fondo inicial y egresos de emergencia (ADC-3.1): `cash_closes` no tiene columnas de float/egresos (:431-439) y la fórmula `difference = counted_cents − expected_cents` (:485) no tiene término de egreso — un delta no trivial que alteraría la semántica de F8 (:339) y la forma D10. Delta futuro registrado: `cash_closes.opening_float_cents BIGINT NULL` + manejo de egresos. La fórmula :485 queda sin cambios en esta versión; la pantalla liga solo al contrato que existe (expected vs counted, S4-1 SPRINTS.md:120).
+**Delta note — SDD stitch-admin-prompts (D10 DEFERRED; docs-only, NO DDL).** La pantalla de cierre (P5) omite fondo inicial y egresos de emergencia (ADC-3.1): `cash_closes` no tiene columnas de float/egresos (:431-439) y la fórmula `difference = counted_cents − expected_cents` (:485) no tiene término de egreso — un delta no trivial que alteraría la semántica de F8 (:339) y la forma D10. Delta futuro registrado: `cash_closes.opening_float_cents BIGINT NULL` + manejo de egresos. La fórmula :485 queda sin cambios en esta versión; la pantalla liga solo al contrato que existe (expected vs counted, SPRINTS.md S4-1).
 
 ### `cash_close_counts` — Cash close (tenant-scoped/RLS)
 
@@ -855,6 +855,8 @@ The decisions above imply the following amendments to the existing ARCHITECTURE.
 | 7 | `payment_method` CHECK gains sixth value `'fiado'` on BOTH `sales` and `cash_close_counts` — amends the spec's five-value pin by user approval | D11 |
 
 The re-syncing of ARCHITECTURE.md and SPRINTS.md text to reflect these amendments is a separate follow-up change registered in Engram (topic `sdd/database-design-doc/follow-ups`, memory #157). It is out of scope for this change.
+
+**Status of this follow-up (2026-10-14).** The SPRINTS.md half is applied: `SPRINTS.md` was re-synchronised to amendments 1, 3, 5 and 7 — no conflict UI anywhere, `tenders` treated as the `sales.payment_method` column, `sync_events` as `idempotency_keys`, and six `payment_method` values including `'fiado'` — and it now cites sections, sprints and task IDs instead of line numbers. The ARCHITECTURE.md half is unaffected by that work and keeps its own status in the follow-ups register.
 
 ## 9. Not in this version
 

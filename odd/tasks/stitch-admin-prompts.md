@@ -40,7 +40,9 @@ Fuera de alcance: migrar el POS website de Stitch a Figma; mobile/responsive.
 - [x] **T5** `sdd-spec` — contratos de datos y requisitos por pantalla
 - [x] **T6** `sdd-design` — arquitectura de prompts
 - [x] **T7** `sdd-tasks` — breakdown
-- [x] **T8** Emitir los 8 prompts finales — 8 work-unit commits en `feat/stitch-admin-prompts` + verificación anti-drift estática (ver sección T8)
+- [x] **T8** Emitir los 8 prompts finales — 9 work-unit commits en `feat/stitch-admin-prompts` (76ec23d..4aa729a) + verificación anti-drift estática (ver sección T8)
+- [x] **T9** `sdd-archive` — cambio CERRADO (2026-10-03); reporte obs 361; artefactos proposal 354 / spec 355 / design 356 / tasks 358 / apply-progress 360 preservados
+- [x] **T10** Generar superprompt consolidado para Stitch — archivo `docs/STITCH_SUPER_PROMPT.md` (inglés, desktop Admin 1440x900, P1-P8 con Block T global + reglas de auth + deferred list + banned tokens)
 
 ## Findings (sdd-explore)
 
