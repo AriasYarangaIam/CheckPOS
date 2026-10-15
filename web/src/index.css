@@ -1,7 +1,150 @@
 @import "tailwindcss";
 
 /*
- * La capa de tokens de diseño (paleta 60-30-10 y tipografía Inter / JetBrains
- * Mono con tnum) aterriza en W1-FE-2 sobre este mismo archivo mediante `@theme`.
- * Sprint 1 no declara tokens: solo monta el pipeline de Tailwind.
+ * Capa de tokens de diseño del POS SaaS (docs/DESIGN.md §2, docs/FRONTEND.md
+ * TASK 1.2).
+ *
+ * Tailwind v4 es CSS-first: el sistema de tokens vive acá, en `@theme`, y no en
+ * un `tailwind.config.js`. `docs/FRONTEND.md:86` nombra ese archivo, pero es una
+ * divergencia ya registrada: `@tailwindcss/vite` v4 nunca lo lee, así que el
+ * contrato se declara en CSS y `@theme` emite las custom properties junto con
+ * las utilidades derivadas.
+ *
+ * Todo valor de este bloque sale de `docs/DESIGN.md` §2.1 (paleta), §2.2
+ * (tipografía y escalas) y §2.3 (elevación); ninguno se inventa acá.
+ *
+ * `static` obliga a emitir el juego completo de custom properties en `:root`.
+ * Sin él Tailwind poda las variables que ninguna utilidad usa todavía —por
+ * ejemplo `display-lg`, que espera a la pantalla de vuelto— y el contrato de
+ * tokens dejaría de estar completo en el CSS publicado.
  */
+@theme static {
+  /* --- 60% dominante: superficies neutras y texto (DESIGN.md §2.1) --- */
+  --color-surface-bg: #f4f4f5;
+  --color-surface-card: #ffffff;
+  --color-text-primary: #18181b;
+  --color-text-secondary: #71717a;
+  --color-text-muted: #a1a1aa;
+
+  /* --- 30% secundario: contenedores, segmented controls, divisores --- */
+  --color-surface-subtle: #e4e4e7;
+  /* La tabla de §2.1 admite dos grises de borde (#E4E4E7 / #D4D4D8); se toma el
+     primero para que borde y superficie sutil compartan el mismo escalón. */
+  --color-surface-border: #e4e4e7;
+
+  /* --- 10% acento: CTA, escaneo exitoso, badges activos --- */
+  --color-accent-primary: #10b981;
+  --color-accent-hover: #059669;
+  --color-accent-glow: rgb(16 185 129 / 0.3);
+
+  /* --- Semántica de estado y de los 6 tenders (DESIGN.md §2.1) --- */
+  --color-danger-action: #e11d48;
+  --color-badge-fiado: #f59e0b;
+  --color-badge-yape: #7c3aed;
+  --color-badge-plin: #0284c7;
+  --color-badge-card: #2563eb;
+  --color-badge-other: #52525b;
+
+  /* Elevación del botón principal (DESIGN.md §2.3, `shadow-glow-emerald`). */
+  --shadow-glow-emerald: 0 8px 24px -4px rgb(16 185 129 / 0.35);
+
+  /*
+   * Tipografía (DESIGN.md §2.2). Los nombres `Inter Variable` y
+   * `JetBrains Mono Variable` son los `font-family` que declara
+   * `@fontsource-variable/*`, que viaja empaquetado con la PWA: la app no pide
+   * fuentes por red (offline-first, sin `<link>` a Google Fonts).
+   */
+  --font-sans: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+
+  /* Escala tipográfica completa de DESIGN.md §2.2. */
+  --text-display-xl: 2.25rem;
+  --text-display-xl--line-height: 2.5rem;
+  --text-display-xl--font-weight: 900;
+  --text-display-lg: 1.875rem;
+  --text-display-lg--line-height: 2.25rem;
+  --text-display-lg--font-weight: 800;
+  --text-heading-md: 1.25rem;
+  --text-heading-md--line-height: 1.75rem;
+  --text-heading-md--font-weight: 700;
+  --text-body-md: 0.875rem;
+  --text-body-md--line-height: 1.25rem;
+  --text-body-md--font-weight: 600;
+  --text-body-sm: 0.75rem;
+  --text-body-sm--line-height: 1rem;
+  --text-body-sm--font-weight: 500;
+  --text-caption-xs: 0.625rem;
+  --text-caption-xs--line-height: 0.75rem;
+  --text-caption-xs--font-weight: 700;
+
+  /*
+   * Resorte amortiguado de los diálogos: `scale(0.96) -> scale(1)` con
+   * `opacity 0 -> 1` sobre la curva `cubic-bezier(0.16, 1, 0.3, 1)`.
+   *
+   * Divergencia entre autoridades: `docs/FRONTEND.md:19` fija la entrada en
+   * `scale(0.96)`, mientras que `docs/DESIGN.md` §6.2:304 la fija en
+   * `scale(0.95)`. Esta implementación sigue `docs/FRONTEND.md:19` por ser el
+   * plan que ejecuta `W1-FE-3`; el 1% de diferencia no es perceptible, pero la
+   * discrepancia está pendiente de cierre y se registra como hallazgo.
+   *
+   * Arranca desde `scale(0.96)` y no desde `scale(0)`: nada aparece de la nada.
+   * 200ms queda dentro de la banda de modales (docs/DESIGN.md §5.2) y no se
+   * retriggerea en ráfaga, así que una animación CSS (fuera del hilo principal)
+   * es la herramienta correcta.
+   */
+  --animate-modal-spring: modal-spring 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fade-in 150ms ease-out;
+
+  @keyframes modal-spring {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+@layer base {
+  /*
+   * Rol numérico-tabular (DESIGN.md §2.2). Tailwind solo emite
+   * `font-variant-numeric: tabular-nums` para la utilidad `tabular-nums`;
+   * el contrato pide además `font-feature-settings: "tnum" 1`. Fijado sobre el
+   * rol mono, todo dígito de un importe tiene ancho constante y el refresco de
+   * totales no mueve un píxel (docs/FRONTEND.md:21, docs/DESIGN.md §6.2:300).
+   */
+  .font-mono {
+    font-feature-settings: "tnum" 1;
+  }
+}
+
+/*
+ * Movimiento reducido: se conserva el fundido (ayuda a comprender el cambio de
+ * estado) y se elimina el escalado. La curva y la duración quedan en la
+ * variante suave.
+ */
+@keyframes modal-spring-reduced {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-modal-spring {
+    animation: modal-spring-reduced 150ms ease-out;
+  }
+}
