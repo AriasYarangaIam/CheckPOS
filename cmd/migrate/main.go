@@ -20,7 +20,10 @@
 //
 // The connection string comes from DATABASE_URL. A `.env` file in the working
 // directory is loaded first when the variable is not already set; the fallback points
-// at the container declared in docker-compose.yml (host port 5433).
+// at the container declared in docker-compose.yml (host port 5433). Both the variable
+// and the fallback live in internal/platform/config, shared with cmd/api and the
+// integration tests; the embedded migrations and the goose dialect live in
+// internal/platform/postgres.
 package main
 
 import (
@@ -28,7 +31,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -37,12 +39,9 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 	"github.com/pressly/goose/v3"
 
-	"github.com/AriasYarangaIam/CheckPOS/migrations"
+	"github.com/AriasYarangaIam/CheckPOS/internal/platform/config"
+	"github.com/AriasYarangaIam/CheckPOS/internal/platform/postgres"
 )
-
-// defaultDatabaseURL matches the local container published by docker-compose.yml.
-// Host port 5433 because port 5432 is already occupied on the development machine.
-const defaultDatabaseURL = "postgres://pos:pos_local_dev@localhost:5433/pos?sslmode=disable"
 
 // migrationsDir is the path inside the embedded filesystem that goose reads.
 const migrationsDir = "."
@@ -71,12 +70,13 @@ func run(args []string) error {
 		return fmt.Errorf("unknown command %q", command)
 	}
 
-	loadDotEnv(".env")
+	config.DotEnv(".env")
 
-	// The SQL files are compiled into this binary; no filesystem lookup happens.
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("set dialect: %w", err)
+	// The SQL files are compiled into the binary; no filesystem lookup happens. Sharing
+	// this setup with cmd/api and the integration tests is what keeps a single way of
+	// applying the schema.
+	if err := postgres.SetupGoose(); err != nil {
+		return err
 	}
 
 	db, err := openDatabase()
@@ -142,7 +142,7 @@ commands:
 // openDatabase connects with DATABASE_URL and verifies the connection immediately, so
 // a stopped container fails loudly instead of behind a later migration error.
 func openDatabase() (*sql.DB, error) {
-	dsn := databaseURL()
+	dsn := config.DatabaseURL()
 
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -154,7 +154,7 @@ func openDatabase() (*sql.DB, error) {
 
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("connect to %s: %w (is the container up? try `docker compose up -d`)", redactDSN(dsn), err)
+		return nil, fmt.Errorf("connect to %s: %w (is the container up? try `docker compose up -d`)", config.RedactDSN(dsn), err)
 	}
 
 	return db, nil
@@ -198,51 +198,3 @@ WHERE t.table_schema = 'public'
   AND t.table_type = 'BASE TABLE'
   AND NOT c.relispartition
   AND t.table_name <> 'goose_db_version'`
-
-func databaseURL() string {
-	if v := strings.TrimSpace(os.Getenv("DATABASE_URL")); v != "" {
-		return v
-	}
-	return defaultDatabaseURL
-}
-
-// loadDotEnv sets DATABASE_URL from a KEY=VALUE file when the environment does not
-// already define it. Anything already exported wins. Missing file is not an error.
-func loadDotEnv(path string) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.Trim(strings.TrimSpace(value), `"'`)
-		if key == "" {
-			continue
-		}
-		if _, exists := os.LookupEnv(key); !exists {
-			_ = os.Setenv(key, value)
-		}
-	}
-}
-
-// redactDSN hides the password before a connection string reaches a log or a terminal.
-func redactDSN(dsn string) string {
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		return "<database url>"
-	}
-	if parsed.User != nil {
-		if _, hasPassword := parsed.User.Password(); hasPassword {
-			parsed.User = url.UserPassword(parsed.User.Username(), "****")
-		}
-	}
-	return parsed.String()
-}
