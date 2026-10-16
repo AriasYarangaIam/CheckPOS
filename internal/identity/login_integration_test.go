@@ -16,11 +16,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/config"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
+	"github.com/AriasYarangaIam/CheckPOS/internal/platform/postgres"
 )
 
 // alwaysReady es el sondeo de preparación del router de estas pruebas: la base ya está
@@ -86,54 +88,44 @@ func (f loginFixture) seed(t *testing.T, db *testDatabase) {
 // productNamesWithTenantContext lee el catálogo con el contexto de tenant fijado y devuelve
 // los nombres visibles.
 //
-// Es el mecanismo que CONSUME un tenant: el GUC como primera sentencia de la transacción y las
-// políticas de RLS filtrando por `current_setting('app.current_tenant_id')::uuid`. Sin este
+// Es el mecanismo que CONSUME un tenant, y desde W2-BE-2 es el helper de producción:
+// `postgres.WithTenant` abre la transacción, fija el GUC como primera sentencia y confirma, y
+// las políticas de RLS filtran por `current_setting('app.current_tenant_id')::uuid`. Sin este
 // camino, «el tenant sale solo del token» no sería comprobable: lo que se prueba no es que el
 // handler ignore un campo, sino que el tenant que termina aplicándose es el del token.
-//
-// El envoltorio del pool con este mismo contrato es el helper de transacción de tenant
-// (`postgres.WithTenant`, W2-BE-2).
-func productNamesWithTenantContext(t *testing.T, pool *pgxpool.Pool, tenantID string) []string {
+func productNamesWithTenantContext(t *testing.T, tenants *postgres.TenantPool, tenantID string) []string {
 	t.Helper()
 
 	ctx := context.Background()
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("abrir la transacción de tenant %s: %v", tenantID, err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if _, err := tx.Exec(ctx, setTenantSettingSQL, tenantID); err != nil {
-		t.Fatalf("fijar el contexto de tenant %s: %v", tenantID, err)
-	}
-
-	rows, err := tx.Query(ctx, `SELECT name FROM products ORDER BY name`)
-	if err != nil {
-		t.Fatalf("leer products con el contexto de tenant %s: %v", tenantID, err)
-	}
-	defer rows.Close()
-
 	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatalf("leer el nombre de un producto: %v", err)
+
+	err := tenants.WithTenant(ctx, uuid.MustParse(tenantID), func(ctx context.Context, tx postgres.TenantTx) error {
+		rows, err := tx.Query(ctx, `SELECT name FROM products ORDER BY name`)
+		if err != nil {
+			return err
 		}
-		names = append(names, name)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("recorrer products: %v", err)
+		defer rows.Close()
+
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return err
+			}
+			names = append(names, name)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatalf("leer el catálogo con el contexto de tenant %s: %v", tenantID, err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatalf("confirmar la transacción de tenant %s: %v", tenantID, err)
-	}
 	return names
 }
 
 // productNamesWithoutTenantContext lee el catálogo con el pool crudo, sin fijar ningún
 // contexto: es la forma fail-closed del contrato, y el punto de partida que hace falsable
-// cualquier lectura posterior (docs/DATABASE.md §5.7).
+// cualquier lectura posterior (docs/DATABASE.md §5.7). Corre fuera del helper a propósito: es
+// la forma de MEDIR que sin contexto no hay filas, no una consulta de negocio.
 func productNamesWithoutTenantContext(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
 
@@ -269,13 +261,17 @@ func TestLoginScopesTheRequestToTheTokensTenant(t *testing.T) {
 	appPool := db.rolePool(t, config.AppDatabaseURL(), "pos_app")
 	authPool := db.rolePool(t, config.AuthDatabaseURL(), "pos_auth")
 
+	// El pool de datos entra al helper: la lectura con contexto de tenant pasa por la única
+	// ruta de datos que el tipo expone (W2-BE-2).
+	tenants := postgres.NewTenantPool(appPool)
+
 	// El estado de partida, medido: la lectura de catálogo discrimina. Sin contexto no hay
 	// ninguna fila, y cada contexto ve exactamente la suya. Sin estas dos mediciones, la
 	// aserción de abajo no probaría que la lectura depende del tenant.
 	if got := productNamesWithoutTenantContext(t, appPool); len(got) != 0 {
 		t.Fatalf("products sin contexto de tenant = %v, want ninguna fila (fail-closed)", got)
 	}
-	if got := productNamesWithTenantContext(t, appPool, tenantB.tenantID); len(got) != 1 || got[0] != tenantB.productName {
+	if got := productNamesWithTenantContext(t, tenants, tenantB.tenantID); len(got) != 1 || got[0] != tenantB.productName {
 		t.Fatalf("products con el contexto de B = %v, want [%q]: la lectura no discrimina y la prueba no probaría nada", got, tenantB.productName)
 	}
 
@@ -336,7 +332,7 @@ func TestLoginScopesTheRequestToTheTokensTenant(t *testing.T) {
 
 	// La prueba del criterio: el tenant que hay que aplicar es el del token, y con ese contexto
 	// la lectura ve el catálogo de A y no el de B.
-	visible := productNamesWithTenantContext(t, appPool, claims.TenantID.String())
+	visible := productNamesWithTenantContext(t, tenants, claims.TenantID.String())
 	if len(visible) != 1 || visible[0] != tenantA.productName {
 		t.Errorf("products con el tenant del token = %v, want [%q]", visible, tenantA.productName)
 	}
@@ -348,7 +344,7 @@ func TestLoginScopesTheRequestToTheTokensTenant(t *testing.T) {
 
 	// El control cerró el círculo: con el contexto de B la misma lectura devuelve el otro
 	// producto, así que haber aplicado el tenant falsificado se habría visto.
-	if got := productNamesWithTenantContext(t, appPool, tenantB.tenantID); len(got) != 1 || got[0] != tenantB.productName {
+	if got := productNamesWithTenantContext(t, tenants, tenantB.tenantID); len(got) != 1 || got[0] != tenantB.productName {
 		t.Fatalf("el control cambió: products con el contexto de B = %v, want [%q]", got, tenantB.productName)
 	}
 
