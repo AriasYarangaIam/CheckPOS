@@ -11,9 +11,9 @@ Define la arquitectura cliente, la estandarización de las propuestas de **Googl
 
 ### 1.1 Pilares de Diseño Engineering (Craft Floor)
 1. **Regla de Color 60-30-10 Estricta (Light Mode):**
-   - **60% Dominante:** Fondos neutros limpios (`zinc-50` / `#F4F4F5`, `white` / `#FFFFFF`), tipografía nítida (`zinc-900` / `#18181B`).
+   - **60% Dominante:** Fondos neutros limpios (`zinc-100` / `#F4F4F5`, `white` / `#FFFFFF`), tipografía nítida (`zinc-900` / `#18181B`).
    - **30% Secundario:** Tarjetas de producto, contenedores de navegación, segmented controls (`zinc-100` / `zinc-200`).
-   - **10% Acento:** Color de llamada a la acción primario, alertas de escaneo exitoso y badges activos. Por defecto **Verde Esmeralda** (`emerald-600` / `#059669` / `#10B981`).
+   - **10% Acento:** Color de llamada a la acción primario, alertas de escaneo exitoso y badges activos. Por defecto **Verde Esmeralda** (`emerald-600` / `#059669` / `emerald-500` / `#10B981`).
 2. **Principios de Emil Kowalski (UI Motion & Interaction):**
    - **Cero latencia/animación en acciones frecuentes:** La escritura en el buscador (F2), el disparo por lector láser (< 40ms) y el tipeo en numpad son de 0ms sin transiciones.
    - **Resorte amortiguado (Spring Physics):** Modales y diálogos emergen de `scale(0.96) -> scale(1)` con `cubic-bezier(0.16, 1, 0.3, 1)`.
@@ -86,7 +86,7 @@ El diseño se encuentra estandarizado e inspeccionado a partir de los dos proyec
   - Configurar `tailwind.config.js` con los tokens de `DESIGN.md`:
     - Neutros 60%: `bg-zinc-50`, `bg-white`, `text-zinc-900`, `border-zinc-200`.
     - Secundarios 30%: `bg-zinc-100`, `bg-zinc-200`.
-    - Acento 10%: `emerald-600` (`#10B981`), `emerald-500`, `shadow-glow-emerald`.
+    - Acento 10%: `emerald-500` (`#10B981`), `emerald-600`, `shadow-glow-emerald`.
     - Tipografía: Inter para UI chrome, JetBrains Mono con `tnum` para importes `S/`.
 - [ ] **TASK 1.3: Componentes Base de UI (Shadcn Primitives)**
   - Implementar `Button` (con estado `:active { transform: scale(0.98); }`).

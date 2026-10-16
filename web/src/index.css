@@ -41,7 +41,9 @@
   --color-danger-action: #e11d48;
   --color-badge-fiado: #f59e0b;
   --color-badge-yape: #7c3aed;
-  --color-badge-plin: #0284c7;
+  /* El celeste `#0284C7` (sky-600) solo daba 4,10:1 con el texto blanco del
+     Badge (10px = texto normal) y quedaba bajo AA; sky-700 mide 5,93:1. */
+  --color-badge-plin: #0369a1;
   --color-badge-card: #2563eb;
   --color-badge-other: #52525b;
 
