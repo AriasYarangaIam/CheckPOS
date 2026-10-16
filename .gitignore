@@ -1,6 +1,12 @@
 # Local AI runtime state
 .atl/
+.agent/
+.engram/
+.impeccable/
 .playwright-mcp/
+
+# CodeGraph index: per worktree, machine-specific, never shared
+.codegraph/
 
 # Local environment (holds DATABASE_URL; .env.example is the committed template)
 .env
