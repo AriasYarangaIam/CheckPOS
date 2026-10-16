@@ -68,12 +68,15 @@ const TAILWIND_PALETTE: Record<string, string> = {
  * Prefijo de color de una utilidad, o `undefined` si no es una utilidad de
  * color. El caso negativo importa: `text-body-md` comparte prefijo con las
  * utilidades de color sin serlo, y `outline-2` / `outline-offset-2` comparten
- * prefijo con `outline-<color>`.
+ * prefijo con `outline-<color>`. `border-` entra por el borde de foco del
+ * `Input`; un ancho (`border-2`) no tiene custom property que lo resuelva y
+ * vuelve `undefined`, así que sigue cayendo del lado negativo.
  */
-function colorPrefix(token: string): 'bg-' | 'text-' | 'outline-' | undefined {
+function colorPrefix(token: string): 'bg-' | 'text-' | 'outline-' | 'border-' | undefined {
   if (token.startsWith('bg-')) return 'bg-'
   if (token.startsWith('text-')) return 'text-'
   if (token.startsWith('outline-')) return 'outline-'
+  if (token.startsWith('border-')) return 'border-'
 
   return undefined
 }
@@ -360,80 +363,161 @@ describe('Button contrast', () => {
 })
 
 /*
- * Anillo de foco (WCAG 1.4.11, non-text contrast: 3:1). El anillo es no textual
- * y no se mide contra una sola superficie: puede dibujarse sobre la tarjeta y
- * sobre el fondo de la aplicación (§2.1:39-40), así que ambas entran a la
- * verificación. El color no se copia: se resuelve desde la utilidad
- * `focus-visible:outline-*` que cada primitivo emite y desde la capa de tokens
- * de `src/index.css`, de modo que volver al escalón claro del acento —2,54:1
- * sobre `#FFFFFF` y 2,31:1 sobre `#F4F4F5`— falle en la suite y no en una
- * revisión visual.
+ * Indicador de foco (WCAG 1.4.11, non-text contrast: 3:1). Lo forman dos trazos:
+ * el anillo (`focus-visible:outline-*`) y, en los campos, el borde del propio
+ * control (`focus-visible:border-*`). Ningún trazo se mide contra una sola
+ * superficie: puede dibujarse sobre la tarjeta y sobre el fondo de la aplicación
+ * (§2.1:39-40), así que ambas entran a la verificación. Los colores no se copian:
+ * se resuelven desde la utilidad que cada primitivo emite y desde la capa de
+ * tokens de `src/index.css`, de modo que volver al escalón claro del acento
+ * —2,54:1 sobre `#FFFFFF` y 2,31:1 sobre `#F4F4F5`— falle en la suite y no en una
+ * revisión visual. El par borde/anillo es una sola decisión de color: dos
+ * escalones distintos pintarían dos verdes en el mismo campo enfocado, y eso
+ * también se mide acá.
  */
 
 /**
- * Superficies de §2.1 sobre las que puede caer el anillo. El `Record` obliga a
- * que cada superficie del sistema tenga su fila: una superficie nueva sin
+ * Superficies de §2.1 sobre las que puede caer el indicador de foco. El `Record`
+ * obliga a que cada superficie del sistema tenga su fila: una superficie nueva sin
  * verificar no compila hasta entrar a la medición.
  */
-const FOCUS_RING_SURFACES: Record<'surface-card' | 'surface-bg', true> = {
+const FOCUS_SURFACES: Record<'surface-card' | 'surface-bg', true> = {
   'surface-card': true,
   'surface-bg': true,
 }
 
-/** Color del anillo de foco: la primera utilidad `focus-visible:outline-*` con color. */
-function focusRingColor(css: string, classes: string): string {
+/** Primitivos que dibujan indicador de foco y cuyas clases se resuelven acá. */
+type FocusPrimitive = 'Button' | 'Input' | 'DialogContent' | 'DialogClose'
+
+/** Indicador de foco de un primitivo: anillo siempre, borde si lo declara. */
+type FocusIndicator = {
+  /** Anillo: la primera utilidad `focus-visible:outline-*` con color. */
+  ring: string
+  /** Borde de foco: la primera utilidad `focus-visible:border-*` con color. */
+  border?: string
+}
+
+/**
+ * Primitivos que, además del anillo, declaran un borde de foco propio. El `Record`
+ * obliga a que cada uno tenga su fila, y el valor es `true` y no un booleano, así
+ * que la única forma de sacar a un primitivo de la medición es borrar la fila: el
+ * conjunto resuelto desde el DOM se compara contra estas claves, de modo que un
+ * borde nuevo sin declarar también detiene la suite.
+ */
+const FOCUS_BORDER_PRIMITIVES: Record<'Input', true> = {
+  Input: true,
+}
+
+/**
+ * Color de la primera utilidad `focus-visible:<propiedad>*` que declare color, o
+ * `undefined` si el primitivo no declara esa propiedad.
+ */
+function focusUtilityColor(
+  css: string,
+  classes: string,
+  property: 'border-' | 'outline-',
+): string | undefined {
   for (const candidate of classes.split(/\s+/)) {
-    if (!candidate.startsWith('focus-visible:outline-')) continue
+    if (!candidate.startsWith(`focus-visible:${property}`)) continue
 
     const value = utilityColor(css, candidate)
 
     if (value !== undefined) return value
   }
 
-  throw new Error(`El anillo de foco no declara ninguna utilidad de color outline-*: ${classes}`)
+  return undefined
+}
+
+/** Anillo de foco del primitivo; falla si el contrato dejó de declararlo. */
+function focusRingColor(css: string, classes: string): string {
+  const ring = focusUtilityColor(css, classes, 'outline-')
+
+  if (ring === undefined) {
+    throw new Error(`El anillo de foco no declara ninguna utilidad de color outline-*: ${classes}`)
+  }
+
+  return ring
+}
+
+/** Indicador de foco de una lista de clases: el anillo y, si existe, el borde. */
+function focusIndicator(css: string, classes: string): FocusIndicator {
+  return {
+    ring: focusRingColor(css, classes),
+    border: focusUtilityColor(css, classes, 'border-'),
+  }
 }
 
 /**
- * Anillo de cada primitivo que lo declara, resuelto a su color. Los que no
+ * Indicador de cada primitivo que lo declara, resuelto a sus colores. Los que no
  * exportan su `cva` se leen del DOM, así que la verificación corre sobre la
  * cadena que de verdad llega a la pantalla y no sobre la fuente.
  */
-function focusRingColors(): Record<'Button' | 'Input' | 'DialogContent' | 'DialogClose', string> {
+function focusIndicators(): Record<FocusPrimitive, FocusIndicator> {
   const css = tokenSource()
 
-  render(<Input aria-label="Campo con anillo de foco" />)
-  const input = screen.getByRole('textbox', { name: 'Campo con anillo de foco' })
+  render(<Input aria-label="Campo con indicador de foco" />)
+  const input = screen.getByRole('textbox', { name: 'Campo con indicador de foco' })
 
   render(
     <Dialog>
-      <DialogTrigger>Abrir anillo de foco</DialogTrigger>
+      <DialogTrigger>Abrir indicador de foco</DialogTrigger>
       <DialogContent>
-        <DialogTitle>Anillo de foco</DialogTitle>
+        <DialogTitle>Indicador de foco</DialogTitle>
       </DialogContent>
     </Dialog>,
   )
-  fireEvent.click(screen.getByRole('button', { name: 'Abrir anillo de foco' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Abrir indicador de foco' }))
 
   const shell = screen.getByRole('dialog').firstElementChild as HTMLElement
 
   return {
-    Button: focusRingColor(css, cn(buttonVariants({ variant: 'primary', size: 'md' }))),
-    Input: focusRingColor(css, input.className),
-    DialogContent: focusRingColor(css, shell.className),
-    DialogClose: focusRingColor(css, screen.getByLabelText('Cerrar').className),
+    Button: focusIndicator(css, cn(buttonVariants({ variant: 'primary', size: 'md' }))),
+    Input: focusIndicator(css, input.className),
+    DialogContent: focusIndicator(css, shell.className),
+    DialogClose: focusIndicator(css, screen.getByLabelText('Cerrar').className),
   }
 }
 
-describe('focus ring contrast', () => {
+describe('focus indicator contrast', () => {
   it('clears 3:1 on every surface the ring can be drawn on', () => {
     const css = tokenSource()
-    const surfaces = Object.keys(FOCUS_RING_SURFACES)
+    const surfaces = Object.keys(FOCUS_SURFACES)
 
-    for (const [component, ring] of Object.entries(focusRingColors())) {
+    for (const [component, indicator] of Object.entries(focusIndicators())) {
       for (const surface of surfaces) {
         expect(
-          contrastRatio(requiredToken(css, surface), ring),
-          `${component}: anillo ${ring} sobre ${surface}`,
+          contrastRatio(requiredToken(css, surface), indicator.ring),
+          `${component}: anillo ${indicator.ring} sobre ${surface}`,
+        ).toBeGreaterThanOrEqual(3)
+      }
+    }
+  })
+
+  it('clears 3:1 with the focus border on the same surfaces', () => {
+    const css = tokenSource()
+    const surfaces = Object.keys(FOCUS_SURFACES)
+    const indicators = focusIndicators()
+    const declared = Object.keys(FOCUS_BORDER_PRIMITIVES) as FocusPrimitive[]
+    const resolved = (Object.keys(indicators) as FocusPrimitive[])
+      .filter((primitive) => indicators[primitive].border !== undefined)
+      .sort()
+
+    // Ningún primitivo emite un borde de foco fuera de la tabla: si aparece uno
+    // sin declarar, queda medido o la tabla lo rechaza.
+    expect(resolved).toEqual([...declared].sort())
+
+    for (const primitive of declared) {
+      const { border } = indicators[primitive]
+
+      // La comparación de arriba ya fija el conjunto; el guardia estrecha el tipo.
+      if (border === undefined) {
+        throw new Error(`${primitive} no emite ninguna utilidad focus-visible:border-*`)
+      }
+
+      for (const surface of surfaces) {
+        expect(
+          contrastRatio(requiredToken(css, surface), border),
+          `${primitive}: borde ${border} sobre ${surface}`,
         ).toBeGreaterThanOrEqual(3)
       }
     }
@@ -445,8 +529,21 @@ describe('focus ring contrast', () => {
     const css = tokenSource()
     const expected = requiredToken(css, 'accent-hover')
 
-    for (const [component, ring] of Object.entries(focusRingColors())) {
-      expect(ring, component).toBe(expected)
+    for (const [component, indicator] of Object.entries(focusIndicators())) {
+      expect(indicator.ring, component).toBe(expected)
+    }
+  })
+
+  it('keeps the focus border on the very same accent step as the ring', () => {
+    // La propiedad que el contrato fija: el estado enfocado no divide el acento en
+    // dos escalones. Con el borde en `accent-primary` y el anillo en
+    // `accent-hover`, el mismo campo mostraba dos verdes distintos al enfocarse.
+    const indicators = focusIndicators()
+
+    for (const primitive of Object.keys(FOCUS_BORDER_PRIMITIVES) as FocusPrimitive[]) {
+      expect(indicators[primitive].border, `${primitive}: borde de foco`).toBe(
+        indicators[primitive].ring,
+      )
     }
   })
 
@@ -457,7 +554,7 @@ describe('focus ring contrast', () => {
     const css = tokenSource()
     const lighter = requiredToken(css, 'accent-primary')
 
-    for (const surface of Object.keys(FOCUS_RING_SURFACES)) {
+    for (const surface of Object.keys(FOCUS_SURFACES)) {
       expect(
         contrastRatio(requiredToken(css, surface), lighter),
         `accent-primary sobre ${surface}`,

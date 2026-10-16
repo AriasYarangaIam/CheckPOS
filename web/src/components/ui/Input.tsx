@@ -12,11 +12,12 @@ import { cn } from '@/lib/utils'
  * subirla, porque la PWA es Android-first (ARCHITECTURE.md:3) y Chrome para
  * Android no amplía el viewport al enfocar un campo.
  *
- * Anillo de foco (WCAG 1.4.11, non-text contrast: 3:1): el `outline` usa
+ * Indicador de foco (WCAG 1.4.11, non-text contrast: 3:1): el `outline` usa
  * `accent-hover` (`#059669`), que mide 3,77:1 sobre `surface-card` (`#FFFFFF`) y
  * 3,43:1 sobre `surface-bg` (`#F4F4F5`), y es el indicador que WCAG mide
- * (docs/DESIGN.md §2.1:46-47). El borde de foco conserva `accent-primary`: es un
- * realce secundario del estado, no el indicador.
+ * (docs/DESIGN.md §2.1:46-47). El borde de foco comparte ese mismo token: el
+ * estado enfocado es una sola decisión de color y no dos escalones del acento,
+ * que pintarían dos verdes distintos en el mismo campo.
  */
 export function Input({ className, type = 'text', ...props }: ComponentProps<'input'>) {
   return (
@@ -24,7 +25,7 @@ export function Input({ className, type = 'text', ...props }: ComponentProps<'in
       className={cn(
         'h-11 w-full rounded-xl border border-surface-border bg-surface-card px-3',
         'text-body-md text-text-primary placeholder:text-text-muted',
-        'focus-visible:border-accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover',
+        'focus-visible:border-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover',
         'disabled:pointer-events-none disabled:opacity-40',
         className,
       )}
