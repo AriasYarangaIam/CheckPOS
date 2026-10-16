@@ -65,13 +65,23 @@ const TAILWIND_PALETTE: Record<string, string> = {
 }
 
 /**
- * Color de una utilidad suelta, o `undefined` si no es una utilidad de color.
- * El segundo caso importa: `text-body-md` comparte prefijo con las utilidades
- * de color sin serlo.
+ * Prefijo de color de una utilidad, o `undefined` si no es una utilidad de
+ * color. El caso negativo importa: `text-body-md` comparte prefijo con las
+ * utilidades de color sin serlo, y `outline-2` / `outline-offset-2` comparten
+ * prefijo con `outline-<color>`.
  */
+function colorPrefix(token: string): 'bg-' | 'text-' | 'outline-' | undefined {
+  if (token.startsWith('bg-')) return 'bg-'
+  if (token.startsWith('text-')) return 'text-'
+  if (token.startsWith('outline-')) return 'outline-'
+
+  return undefined
+}
+
+/** Color de una utilidad suelta, o `undefined` si no es una utilidad de color. */
 function utilityColor(css: string, utility: string): string | undefined {
   const token = utility.slice(utility.lastIndexOf(':') + 1)
-  const prefix = token.startsWith('bg-') ? 'bg-' : token.startsWith('text-') ? 'text-' : undefined
+  const prefix = colorPrefix(token)
 
   if (prefix === undefined) return undefined
 
@@ -345,6 +355,113 @@ describe('Button contrast', () => {
           `${variant}/${size} en ${state}: ${inks[0]} sobre ${fill}`,
         ).toBeGreaterThanOrEqual(minRatio)
       }
+    }
+  })
+})
+
+/*
+ * Anillo de foco (WCAG 1.4.11, non-text contrast: 3:1). El anillo es no textual
+ * y no se mide contra una sola superficie: puede dibujarse sobre la tarjeta y
+ * sobre el fondo de la aplicación (§2.1:39-40), así que ambas entran a la
+ * verificación. El color no se copia: se resuelve desde la utilidad
+ * `focus-visible:outline-*` que cada primitivo emite y desde la capa de tokens
+ * de `src/index.css`, de modo que volver al escalón claro del acento —2,54:1
+ * sobre `#FFFFFF` y 2,31:1 sobre `#F4F4F5`— falle en la suite y no en una
+ * revisión visual.
+ */
+
+/**
+ * Superficies de §2.1 sobre las que puede caer el anillo. El `Record` obliga a
+ * que cada superficie del sistema tenga su fila: una superficie nueva sin
+ * verificar no compila hasta entrar a la medición.
+ */
+const FOCUS_RING_SURFACES: Record<'surface-card' | 'surface-bg', true> = {
+  'surface-card': true,
+  'surface-bg': true,
+}
+
+/** Color del anillo de foco: la primera utilidad `focus-visible:outline-*` con color. */
+function focusRingColor(css: string, classes: string): string {
+  for (const candidate of classes.split(/\s+/)) {
+    if (!candidate.startsWith('focus-visible:outline-')) continue
+
+    const value = utilityColor(css, candidate)
+
+    if (value !== undefined) return value
+  }
+
+  throw new Error(`El anillo de foco no declara ninguna utilidad de color outline-*: ${classes}`)
+}
+
+/**
+ * Anillo de cada primitivo que lo declara, resuelto a su color. Los que no
+ * exportan su `cva` se leen del DOM, así que la verificación corre sobre la
+ * cadena que de verdad llega a la pantalla y no sobre la fuente.
+ */
+function focusRingColors(): Record<'Button' | 'Input' | 'DialogContent' | 'DialogClose', string> {
+  const css = tokenSource()
+
+  render(<Input aria-label="Campo con anillo de foco" />)
+  const input = screen.getByRole('textbox', { name: 'Campo con anillo de foco' })
+
+  render(
+    <Dialog>
+      <DialogTrigger>Abrir anillo de foco</DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Anillo de foco</DialogTitle>
+      </DialogContent>
+    </Dialog>,
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Abrir anillo de foco' }))
+
+  const shell = screen.getByRole('dialog').firstElementChild as HTMLElement
+
+  return {
+    Button: focusRingColor(css, cn(buttonVariants({ variant: 'primary', size: 'md' }))),
+    Input: focusRingColor(css, input.className),
+    DialogContent: focusRingColor(css, shell.className),
+    DialogClose: focusRingColor(css, screen.getByLabelText('Cerrar').className),
+  }
+}
+
+describe('focus ring contrast', () => {
+  it('clears 3:1 on every surface the ring can be drawn on', () => {
+    const css = tokenSource()
+    const surfaces = Object.keys(FOCUS_RING_SURFACES)
+
+    for (const [component, ring] of Object.entries(focusRingColors())) {
+      for (const surface of surfaces) {
+        expect(
+          contrastRatio(requiredToken(css, surface), ring),
+          `${component}: anillo ${ring} sobre ${surface}`,
+        ).toBeGreaterThanOrEqual(3)
+      }
+    }
+  })
+
+  it('draws every ring with the corrected contract step', () => {
+    // Mismo criterio que el relleno del CTA: un primitivo que vuelva al escalón
+    // claro del acento detiene la suite sin depender del ojo de quien revisa.
+    const css = tokenSource()
+    const expected = requiredToken(css, 'accent-hover')
+
+    for (const [component, ring] of Object.entries(focusRingColors())) {
+      expect(ring, component).toBe(expected)
+    }
+  })
+
+  it('rejects the lighter accent step, which fails 3:1 on every surface', () => {
+    // La prueba de mordida: si el umbral de arriba se relajara, esta medición
+    // sigue fijando que `accent-primary` no sirve como anillo en ninguna
+    // superficie del sistema.
+    const css = tokenSource()
+    const lighter = requiredToken(css, 'accent-primary')
+
+    for (const surface of Object.keys(FOCUS_RING_SURFACES)) {
+      expect(
+        contrastRatio(requiredToken(css, surface), lighter),
+        `accent-primary sobre ${surface}`,
+      ).toBeLessThan(3)
     }
   })
 })

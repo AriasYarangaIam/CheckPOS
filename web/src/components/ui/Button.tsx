@@ -28,6 +28,15 @@ import { cn } from '@/lib/utils'
  * y mantiene el matiz que el contrato ya usa para este token (§2.1:54,
  * `bg-rose-600`). `secondary` y `ghost` no cambian: sobre `surface-subtle`
  * (`#E4E4E7`) el `text-primary` mide 13,96:1.
+ *
+ * Anillo de foco (WCAG 1.4.11, non-text contrast: 3:1): el `outline` vive en
+ * `accent-hover` (`#059669`) y no en `accent-primary`. El anillo es no textual y
+ * el foco puede caer sobre cualquiera de las dos superficies de §2.1:39-40; el
+ * escalón claro solo mide 2,54:1 sobre `surface-card` (`#FFFFFF`) y 2,31:1 sobre
+ * `surface-bg` (`#F4F4F5`), así que no cruza el piso en ninguna. El oscuro mide
+ * 3,77:1 y 3,43:1 y sí lo cruza en ambas. Por eso §2.1:46-47 movió el rol
+ * «anillos de foco» de `accent-primary` a `accent-hover`, sin sumar un token
+ * nuevo.
  */
 const buttonVariants = cva(
   [
@@ -35,7 +44,7 @@ const buttonVariants = cva(
     'rounded-xl font-semibold',
     'transition-transform duration-[120ms] ease-out',
     'active:scale-[0.98]',
-    'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary',
+    'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover',
     'disabled:pointer-events-none disabled:opacity-40',
   ],
   {
