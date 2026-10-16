@@ -18,9 +18,19 @@ import { cn } from '@/lib/utils'
  * 12px/500) y `md` (`text-body-md`, 14px/600) son texto normal y ambos llevan
  * `text-primary` (`#18181B`, 4,70:1 sobre el mismo relleno) vía
  * `compoundVariants`. El resplandor de elevación sigue siendo el de §2.1:48 y
- * §2.3:77 (`shadow-glow-emerald`). El hover repite el relleno en lugar de
- * cambiarlo, porque §1.3:153 fija que «el estado hover/active conserva el
- * relleno»: ningún escalón del acento queda expuesto con la tinta equivocada.
+ * §2.3:77 (`shadow-glow-emerald`). El token del relleno no cambia en
+ * hover, pero el color pintado sí: `hover:brightness-105` aclara el relleno un
+ * escalón, sin sumar un token nuevo ni un valor arbitrario. La dirección está
+ * medida en Chromium 155 (canvas 2D, la misma implementación que el filtro CSS)
+ * sobre `#059669`: al 105% el relleno queda en `#059D6E`, la tinta oscura de
+ * `sm` y `md` sube de 4,70:1 a **5,11:1** y el blanco de `cta` baja de 3,77:1 a
+ * **3,47:1**, todavía por encima del piso de 3:1 del texto grande. El escalón
+ * opuesto —el 95%, que oscurece el relleno a `#048E63`— se descartó por
+ * medición: contra `text-primary` cae a **4,26:1** y rompe AA justo en `sm` y
+ * `md`, que son texto normal. Un detalle que la medición del relleno no cubre:
+ * el filtro pinta el elemento entero, así que la tinta también sube un 5%
+ * (`#18181B` → `#19191C`); medido sobre la superficie DOM, el par del hover en
+ * `sm`/`md` queda en 5,11:1 y sigue AA.
  *
  * `danger` conserva `danger-action` en reposo (blanco: 4,70:1) y baja el hover
  * a `rose-700`: blanco sobre `rose-500` (`#F43F5E`) mide 3,67:1 y se queda corto
@@ -50,7 +60,8 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: 'bg-accent-hover text-white shadow-glow-emerald hover:bg-accent-hover',
+        primary:
+          'bg-accent-hover text-white shadow-glow-emerald hover:bg-accent-hover hover:brightness-105',
         secondary: 'border border-surface-border bg-surface-subtle text-text-primary hover:bg-zinc-200',
         ghost: 'text-text-primary hover:bg-surface-subtle',
         danger: 'bg-danger-action text-white hover:bg-rose-700',
