@@ -150,7 +150,7 @@ graph TD
 - Fila superior: Cantidad de ítems en carrito (`Tickets (X productos)`), subtotal acumulado y botón `Vaciar`.
 - **Botón Primario `COBRAR`:**
   - Altura táctil: **52px**.
-  - Color: **Verde Esmeralda** (`#059669` / `emerald-600`) con tipografía Bold y texto blanco. El relleno es `accent-hover`, no `accent-primary`: blanco sobre `#10B981` mide **2,54:1** y no alcanza el umbral AA de 3:1 para texto grande, mientras que sobre `#059669` mide **3,77:1** y sí lo alcanza. El estado hover/active conserva el relleno, refuerza `accent-glow` y aplica `:active { transform: scale(0.98) }` (§6.2:302).
+  - Color: **Verde Esmeralda** (`#059669` / `emerald-600`) con tipografía Bold y texto blanco. El relleno es `accent-hover`, no `accent-primary`: blanco sobre `#10B981` mide **2,54:1** y no alcanza el umbral AA de 3:1 para texto grande, mientras que sobre `#059669` mide **3,77:1** y sí lo alcanza. El estado hover/active conserva el relleno, su único cambio es el `:active { transform: scale(0.98) }` de §6.2:302, y el resplandor `accent-glow` (§2.1:48) es la elevación estática del reposo, no un refuerzo del estado.
   - Despliegue del total a cobrar en tipografía monoespaciada a la derecha.
 
 ---
