@@ -14,6 +14,8 @@
 //	GET  /healthz      sondeo de vida: 200 sin consultar ninguna dependencia
 //	GET  /readyz       sondeo de preparación: 200 si los dos pools responden, 503 si no
 //	POST /auth/login   ruta pre-auth: 200 con el access token de empleado, 401 genérico
+//	POST /auth/device-bind  ruta autenticada: 200 con el dispositivo y su ventana offline,
+//	                        401 si el access token falta o no verifica
 //
 // SIGINT y SIGTERM disparan un apagado ordenado: el servidor deja de aceptar conexiones
 // y espera las peticiones en vuelo antes de cerrar los pools.
@@ -128,10 +130,23 @@ func run() error {
 		return err
 	}
 
+	// El pool de datos entra al helper de transacción de tenant: es la única ruta de datos de la
+	// aplicación y `POST /auth/device-bind` es su primer consumidor de producción (docs/BACKEND.md
+	// §7.7). El tipo no expone ninguna forma de consultar sin contexto, y el ping de /readyz vive
+	// sobre el pool crudo porque no es una consulta de tenant.
+	deviceBind, err := identity.NewDeviceBindHandler(identity.NewPostgresDeviceBinder(postgres.NewTenantPool(pool)), logger)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpx.NewRouter(logger, readiness, httpx.WithRoutes(func(mux *http.ServeMux) {
 			mux.Handle("POST /auth/login", login)
+			// El middleware de token es el único camino por el que este handler se entera de su
+			// tenant: leerlo del cuerpo o de un encabezado no existe en el contrato
+			// (ARCHITECTURE.md:23).
+			mux.Handle("POST /auth/device-bind", identity.RequireAccessToken(issuer, deviceBind))
 		})),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
