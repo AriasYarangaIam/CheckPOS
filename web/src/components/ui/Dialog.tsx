@@ -35,14 +35,14 @@ export function DialogContent({ className, children, ...props }: ComponentProps<
         <div
           className={cn(
             'animate-modal-spring rounded-2xl border border-surface-border bg-surface-card p-5 shadow-lg',
-            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary',
+            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover',
             className,
           )}
         >
           {children}
           <DialogPrimitive.Close
             aria-label="Cerrar"
-            className="absolute right-3 top-3 rounded-xl p-2 text-text-muted transition-colors duration-[120ms] ease-out hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary"
+            className="absolute right-3 top-3 rounded-xl p-2 text-text-muted transition-colors duration-[120ms] ease-out hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover"
           >
             <X aria-hidden={true} className="size-4" />
           </DialogPrimitive.Close>

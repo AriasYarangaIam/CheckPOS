@@ -11,9 +11,9 @@ Para lograr una adopción masiva en comerciantes con nula o escasa alfabetizaci�
 
 ### 1.1 Principios Rectores de Interfaz (Craft Floor)
 1. **Regla de Color 60-30-10 Estricta y Dinámica:**
-   - **60% Dominante:** Fondos neutros limpios (`zinc-50` / `#F4F4F5`, `white` / `#FFFFFF`), superficies pulidas y tipografía nítida (`zinc-900` / `#18181B`).
+   - **60% Dominante:** Fondos neutros limpios (`zinc-100` / `#F4F4F5`, `white` / `#FFFFFF`), superficies pulidas y tipografía nítida (`zinc-900` / `#18181B`).
    - **30% Secundario:** Tarjetas de producto, contenedores de navegación, segmented controls y paneles laterales (`zinc-100` / `zinc-200`).
-   - **10% Acento:** Color de llamada a la acción primario, alertas de escaneo exitoso y badges de notificación activa. Por defecto **Verde Esmeralda** (`emerald-600` / `#059669` / `#10B981`) personalizable mediante extracción K-Means de logo.
+   - **10% Acento:** Color de llamada a la acción primario, alertas de escaneo exitoso y badges de notificación activa. Por defecto **Verde Esmeralda** (`emerald-600` / `#059669` / `emerald-500` / `#10B981`) personalizable mediante extracción K-Means de logo.
 2. **Ergonomía Single-Thumb (Una Sola Mano):**
    - Todos los controles críticos (botón `COBRAR`, conmutador Escáner/Teclado, numpad, billetes rápidos) se ubican en el arco inferior de alcance del pulgar en smartphones (390px a 430px de ancho).
    - Altura mínima táctil para botones principales: **52px**.
@@ -43,12 +43,12 @@ Este sistema de tokens está estructurado para integrarse nativamente con **Goog
 | `text-primary` | `#18181B` | `text-zinc-900` | Títulos, importes monetarios principales |
 | `text-secondary` | `#71717A` | `text-zinc-500` | Subtítulos, horas de turno, etiquetas |
 | `text-muted` | `#A1A1AA` | `text-zinc-400` | Placeholders, separadores secundarios |
-| `accent-primary` | `#10B981` | `bg-emerald-500` | Acento (10%): esquinas del visor, anillos de foco y acentos de éxito |
-| `accent-hover` | `#059669` | `bg-emerald-600` | Fondo del botón `COBRAR`: el único paso del acento que admite texto blanco con contraste AA |
+| `accent-primary` | `#10B981` | `bg-emerald-500` | Acento (10%): esquinas del visor y acentos de éxito; no es anillo de foco, porque sobre `#FFFFFF` mide 2,54:1 y sobre `#F4F4F5` mide 2,31:1, por debajo del 3:1 de WCAG 1.4.11 (non-text contrast) |
+| `accent-hover` | `#059669` | `bg-emerald-600` | Fondo del botón `COBRAR`: el único paso del acento que admite texto blanco con contraste AA, y solo como texto grande (3,77:1 ≥ 3:1, pero < 4,5:1); en los tamaños por debajo de 18,66px en negrita el mismo relleno lleva `text-primary` (4,70:1); también es el anillo de foco (`focus-visible:outline-*`), que sobre `#FFFFFF` mide 3,77:1 y sobre `#F4F4F5` mide 3,43:1, ambos por encima del 3:1 de WCAG 1.4.11 (non-text contrast) |
 | `accent-glow` | `rgba(16,185,129,0.3)` | `shadow-emerald-500/30` | Resplandor de elevación del botón principal |
-| `badge-fiado` | `#F59E0B` | `bg-amber-500` / `text-amber-700` | Módulo de cuentas corrientes / fiados |
-| `badge-yape` | `#7C3AED` | `bg-purple-600` | Identidad billeteras digitales QR (Yape) |
-| `badge-plin` | `#0284C7` | `bg-sky-600` | Identidad billeteras digitales QR (Plin) |
+| `badge-fiado` | `#F59E0B` | `bg-amber-500` / `text-zinc-900` | Módulo de cuentas corrientes / fiados: el texto es `text-primary` (8,25:1); el ámbar oscuro como texto sobre este fondo se queda en 2,34:1 y no alcanza AA |
+| `badge-yape` | `#7C3AED` | `bg-violet-600` | Identidad billeteras digitales QR (Yape) |
+| `badge-plin` | `#0369A1` | `bg-sky-700` | Identidad billeteras digitales QR (Plin): el escalón anterior con texto blanco medía 4,10:1 y no alcanzaba AA; sky-700 mide 5,93:1 |
 | `badge-other` | `#52525B` | `bg-zinc-600` | Método de pago residual "Otro" (entidad neutra) |
 | `badge-card` | `#2563EB` | `bg-blue-600` | Identidad del método de pago Tarjeta (pintado azul de Tarjeta :417; delta D6 — SDD stitch-admin-prompts) |
 | `danger-action` | `#E11D48` | `bg-rose-600` / `text-rose-500` | Botón borrar numpad, mermas, vaciar carro |
@@ -161,7 +161,7 @@ graph TD
 Cuadrícula de 6 tarjetas táctiles de selección inmediata, alineada con la restricción CHECK de `DATABASE.md` (`cash, yape, plin, card, other, fiado`). **Tender único por venta** en MVP (sin split tender): elegir un método define el valor exacto de `sales.payment_method`.
 1. **Efectivo:** Activa la calculadora de vuelto y los chips de billetes rápidos.
 2. **Yape:** Identidad billetera Yape (púrpura `#7C3AED`); muestra QR dinámico en pantalla o confirmación de recepción rápida con código de operación.
-3. **Plin:** Identidad billetera Plin (celeste `#0284C7`); mismo flujo de recepción que Yape.
+3. **Plin:** Identidad billetera Plin (celeste `#0369A1`, que con texto blanco mide 5,93:1: el escalón anterior se quedaba en 4,10:1 y no alcanzaba AA); mismo flujo de recepción que Yape.
 4. **Tarjeta:** Opciones para cobro con POS inalámbrico o terminal POS externo.
 5. **Otro:** Método residual (vale, divisa extranjera, pago mixto manual) — token neutro zinc.
 6. **Fiado (Cuentas Corrientes):** Abre el buscador de cliente deudor registrado; oculto por feature toggle si el negocio no maneja fiados.
@@ -358,7 +358,7 @@ System: Google Stitch UI Engine v1.0
 Task: Generate the tablet-vertical breakpoint (768x1024px) of the responsive POS web app.
 Device: Tablet portrait viewport 768x1024px. This is the 768-1023px branch of the responsive layout (spec section 6.3): sidebar has collapsed into a drawer, catalog is full-width, and the order ticket lives as a bottom sheet behind the COBRAR button.
 Design System: Shadcn UI clean light neutral, 60-30-10 color rule.
-Background (60%): Clean off-white/zinc-50 (#F4F4F5), pure white cards (#FFFFFF), crisp border-zinc-200.
+Background (60%): Clean off-white/zinc-100 (#F4F4F5), pure white cards (#FFFFFF), crisp border-zinc-200.
 Secondary (30%): Zinc-100 components.
 Accent (10%): Vibrant Emerald Green (#059669) for primary checkout CTA.
 Layout Architecture: 2 panels visible (top app bar + catalog); drawer and ticket are overlays, not columns. Do NOT render a persistent 3-column desktop layout.
@@ -384,7 +384,7 @@ System: Google Stitch UI Engine v1.0
 Task: Generate a high-fidelity mobile Point of Sale (POS) Cashier View interface.
 Device: Smartphone viewport 390x844px.
 Design System: Shadcn UI minimalist light aesthetic, 60-30-10 color rule.
-Background (60%): Clean off-white/zinc-50 (#F4F4F5), pure white surface cards (#FFFFFF), crisp border-zinc-200.
+Background (60%): Clean off-white/zinc-100 (#F4F4F5), pure white surface cards (#FFFFFF), crisp border-zinc-200.
 Secondary (30%): Zinc-100 components, soft grey segmented control tabs.
 Accent (10%): Vibrant Emerald Green (#059669) for primary CTA buttons.
 Components to render:
@@ -470,9 +470,9 @@ Palette:
 | accent-primary | #10B981 | bg-emerald-500 | 10% accent |
 | accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
-| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
-| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
-| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-fiado | #F59E0B | bg-amber-500 / text-zinc-900 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-violet-600 | Yape identity |
+| badge-plin | #0369A1 | bg-sky-700 | Plin identity |
 | badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
 | badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
 | danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
@@ -529,9 +529,9 @@ Palette:
 | accent-primary | #10B981 | bg-emerald-500 | 10% accent |
 | accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
-| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
-| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
-| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-fiado | #F59E0B | bg-amber-500 / text-zinc-900 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-violet-600 | Yape identity |
+| badge-plin | #0369A1 | bg-sky-700 | Plin identity |
 | badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
 | badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
 | danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
@@ -588,9 +588,9 @@ Palette:
 | accent-primary | #10B981 | bg-emerald-500 | 10% accent |
 | accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
-| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
-| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
-| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-fiado | #F59E0B | bg-amber-500 / text-zinc-900 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-violet-600 | Yape identity |
+| badge-plin | #0369A1 | bg-sky-700 | Plin identity |
 | badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
 | badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
 | danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
@@ -647,9 +647,9 @@ Palette:
 | accent-primary | #10B981 | bg-emerald-500 | 10% accent |
 | accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
-| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
-| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
-| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-fiado | #F59E0B | bg-amber-500 / text-zinc-900 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-violet-600 | Yape identity |
+| badge-plin | #0369A1 | bg-sky-700 | Plin identity |
 | badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
 | badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
 | danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
@@ -706,9 +706,9 @@ Palette:
 | accent-primary | #10B981 | bg-emerald-500 | 10% accent |
 | accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
-| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
-| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
-| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-fiado | #F59E0B | bg-amber-500 / text-zinc-900 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-violet-600 | Yape identity |
+| badge-plin | #0369A1 | bg-sky-700 | Plin identity |
 | badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
 | badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
 | danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
@@ -765,9 +765,9 @@ Palette:
 | accent-primary | #10B981 | bg-emerald-500 | 10% accent |
 | accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
-| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
-| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
-| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-fiado | #F59E0B | bg-amber-500 / text-zinc-900 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-violet-600 | Yape identity |
+| badge-plin | #0369A1 | bg-sky-700 | Plin identity |
 | badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
 | badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
 | danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
@@ -824,9 +824,9 @@ Palette:
 | accent-primary | #10B981 | bg-emerald-500 | 10% accent |
 | accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
-| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
-| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
-| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-fiado | #F59E0B | bg-amber-500 / text-zinc-900 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-violet-600 | Yape identity |
+| badge-plin | #0369A1 | bg-sky-700 | Plin identity |
 | badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
 | badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
 | danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
@@ -883,9 +883,9 @@ Palette:
 | accent-primary | #10B981 | bg-emerald-500 | 10% accent |
 | accent-hover | #059669 | bg-emerald-600 | primary CTA fill (AA with white) |
 | accent-glow | rgba(16,185,129,0.3) | shadow-emerald-500/30 | primary glow — /30 NEVER /20 |
-| badge-fiado | #F59E0B | bg-amber-500 / text-amber-700 | fiados module — single hex only |
-| badge-yape | #7C3AED | bg-purple-600 | Yape identity |
-| badge-plin | #0284C7 | bg-sky-600 | Plin identity |
+| badge-fiado | #F59E0B | bg-amber-500 / text-zinc-900 | fiados module — single hex only |
+| badge-yape | #7C3AED | bg-violet-600 | Yape identity |
+| badge-plin | #0369A1 | bg-sky-700 | Plin identity |
 | badge-other | #52525B | bg-zinc-600 | residual tender "Otro" |
 | badge-card | #2563EB | bg-blue-600 | Tarjeta identity (D6 — keeps the blue Tarjeta paint :417 alive) |
 | danger-action | #E11D48 | bg-rose-600 / text-rose-500 | delete/numpad, mermas, empty-cart |
