@@ -22,7 +22,7 @@ const FONT_SIZE_TOKENS = [
  * `animate-none`) en lugar de quedar fuera de todo grupo y sobrevivir a la
  * fusión.
  */
-const SHADOW_TOKENS = ['glow-emerald'] as const
+const SHADOW_TOKENS = ['glow-emerald', 'keypad'] as const
 const ANIMATE_TOKENS = ['modal-spring', 'fade-in'] as const
 
 const twMerge = extendTailwindMerge({

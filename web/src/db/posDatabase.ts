@@ -60,6 +60,35 @@ export interface IdempotencyQueueRow {
   readonly created_at: string
 }
 
+/**
+ * Sesión offline de este dispositivo, con el verificador local del PIN
+ * (docs/DATABASE.md §4 `devices`; docs/DESIGN.md:105; decisión D6 de
+ * `odd/tasks/sprint-2-identity.md`).
+ *
+ * Guarda la sal aleatoria y el verificador derivado, nunca el PIN en claro ni el
+ * `pin_hash` del servidor: ese valor argon2id no sale de la base y el cliente no
+ * lo conoce. La marca `offline_session_valid_until` es la del contrato, sin
+ * reinterpretar: el cliente la compara tal cual contra el reloj.
+ */
+export interface DeviceSessionRow {
+  /**
+   * Clave de la fila única. El alcance congelado es 1 dispositivo y 1 cajero
+   * (docs/DESIGN.md:106), así que la sesión del dispositivo es una sola fila con
+   * una clave constante: un segundo dispositivo sería otro alcance, no otra fila.
+   */
+  readonly id: string
+  /** `devices.id` de la respuesta del bind. */
+  readonly device_id: string
+  /** `users.id` del cajero, tal como lo devuelve `POST /auth/login`. */
+  readonly user_id: string
+  /** Marca RFC3339 del contrato: hasta cuándo vale el desbloqueo offline. */
+  readonly offline_session_valid_until: string
+  /** Sal aleatoria por dispositivo, en base64. */
+  readonly pin_salt: string
+  /** PBKDF2-SHA256 del PIN sobre esa sal, en base64. */
+  readonly pin_verifier: string
+}
+
 /** Nombre por defecto de la base. */
 export const POS_DATABASE_NAME = 'pos-saas'
 
@@ -68,6 +97,7 @@ export class PosDatabase extends Dexie {
   products!: Table<ProductRow, string>
   cart!: Table<CartRow, string>
   idempotency_queue!: Table<IdempotencyQueueRow, string>
+  device_session!: Table<DeviceSessionRow, string>
 
   constructor(name: string = POS_DATABASE_NAME) {
     super(name)
@@ -83,6 +113,29 @@ export class PosDatabase extends Dexie {
       products: 'id, gtin, name, category',
       cart: 'id, product_id',
       idempotency_queue: 'id, key, status, created_at',
+    })
+
+    /*
+     * Versión 2 (W2-FE-1): una sola tienda nueva, la sesión offline del
+     * dispositivo.
+     *
+     * Las tres anteriores se repiten **idénticas** aunque Dexie herede lo que no
+     * se repite —omitir una tienda acá no la borra, se verificó con una sonda
+     * sobre el esquema—: repetirlas deja el esquema completo legible en cada
+     * versión, así que el diff entre dos versiones se lee de un vistazo. Lo que
+     * sí destruye datos es cambiar la clave primaria de una tienda existente:
+     * Dexie aborta el ascenso con `UpgradeError`, y eso es lo que la prueba de
+     * la unidad muerde.
+     *
+     * Sin índices: la tienda tiene una fila y se lee por su clave primaria.
+     * Declarar índices sobre columnas que nunca se consultan solo encarecería
+     * cada escritura.
+     */
+    this.version(2).stores({
+      products: 'id, gtin, name, category',
+      cart: 'id, product_id',
+      idempotency_queue: 'id, key, status, created_at',
+      device_session: 'id',
     })
   }
 }

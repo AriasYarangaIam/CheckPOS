@@ -2,7 +2,7 @@
 // global, y este runner no trae IndexedDB.
 import 'fake-indexeddb/auto'
 
-import Dexie from 'dexie'
+import Dexie, { type Table } from 'dexie'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -11,6 +11,7 @@ import {
   getPosDatabase,
   type CartRow,
   type IdempotencyQueueRow,
+  type ProductRow,
 } from '@/db/posDatabase'
 
 /*
@@ -71,6 +72,39 @@ const QUEUED_EVENTS: readonly IdempotencyQueueRow[] = [
   },
 ]
 
+/** Producto local, con el tipo de la fila para que `tsc` imponga su forma. */
+const LOCAL_PRODUCT: ProductRow = {
+  id: 'prod-1',
+  gtin: '7591234567890',
+  name: 'Arroz Costeño 1kg',
+  price_cents: 350,
+  uom: 'unit',
+  stock: 24,
+  photo_url: 'https://storage.example.com/arroz.png',
+  category: 'abarrotes',
+}
+
+/**
+ * La base tal como la declaraba la versión 1 (W1-FE-4), sin la tienda de la
+ * sesión offline. Es la entrada de la prueba de ascenso: escribe datos con este
+ * esquema y después abre el esquema actual sobre el mismo nombre.
+ */
+class VersionOneDatabase extends Dexie {
+  products!: Table<ProductRow, string>
+  cart!: Table<CartRow, string>
+  idempotency_queue!: Table<IdempotencyQueueRow, string>
+
+  constructor(name: string) {
+    super(name)
+
+    this.version(1).stores({
+      products: 'id, gtin, name, category',
+      cart: 'id, product_id',
+      idempotency_queue: 'id, key, status, created_at',
+    })
+  }
+}
+
 /*
  * Especificación de almacenes: la clave primaria y los índices con los que Dexie
  * abre cada tabla (docs/FRONTEND.md:96-100). Es lo que el esquema impone de
@@ -84,6 +118,9 @@ const DECLARED_STORES: readonly {
   { table: 'products', primaryKey: 'id', indexes: ['gtin', 'name', 'category'] },
   { table: 'cart', primaryKey: 'id', indexes: ['product_id'] },
   { table: 'idempotency_queue', primaryKey: 'id', indexes: ['key', 'status', 'created_at'] },
+  // Versión 2 (W2-FE-1): una fila, la sesión offline de este dispositivo. Sin
+  // índices: se lee por su clave primaria y nada más.
+  { table: 'device_session', primaryKey: 'id', indexes: [] },
 ]
 
 /** Clave primaria y caminos de índice declarados, tabla por tabla. */
@@ -130,8 +167,11 @@ describe('PosDatabase schema', () => {
 
     // Criterio de W1-FE-4: lo local es el catálogo del tenant, el carrito y la
     // cola. Un volcado del catálogo global no tiene tabla acá (DATABASE.md:160).
+    // W2-FE-1 sumó una sola tienda —la sesión offline del dispositivo—, que no
+    // es catálogo.
     expect(declared.map((entry) => entry.name).sort()).toEqual([
       'cart',
+      'device_session',
       'idempotency_queue',
       'products',
     ])
@@ -284,6 +324,47 @@ describe('PosDatabase persistence across a reload', () => {
       expect(await afterDelete.cart.count()).toBe(0)
     } finally {
       afterDelete.close()
+    }
+  })
+})
+
+describe('PosDatabase schema upgrade', () => {
+  it('keeps the version-1 data when the schema rises to version 2', async () => {
+    /*
+     * W2-FE-1 suma una tienda, la sesión offline del dispositivo. Dexie exige
+     * repetir la declaración completa en cada versión, y acá se prueba que
+     * repetirla de verdad preserva lo escrito: catálogo, carrito y cola se
+     * escriben con el esquema de la versión 1 y se releen con el actual.
+     */
+    nextId += 1
+    const name = `${POS_DATABASE_NAME}-upgrade-${nextId}`
+    createdNames.add(name)
+
+    const versionOne = new VersionOneDatabase(name)
+
+    await versionOne.open()
+    expect(versionOne.verno).toBe(1)
+
+    await versionOne.products.add(LOCAL_PRODUCT)
+    await versionOne.cart.bulkAdd(CART_LINES)
+    await versionOne.idempotency_queue.bulkAdd(QUEUED_EVENTS)
+    versionOne.close()
+
+    const upgraded = new PosDatabase(name)
+
+    try {
+      await upgraded.open()
+
+      expect(upgraded.verno).toBe(2)
+      expect(await upgraded.products.get('prod-1')).toEqual(LOCAL_PRODUCT)
+      expect(await upgraded.cart.orderBy('id').toArray()).toEqual(CART_LINES)
+      expect(await upgraded.idempotency_queue.orderBy('id').toArray()).toEqual(QUEUED_EVENTS)
+
+      // La tienda nueva existe y arranca vacía: migrar no inventa una sesión.
+      expect(upgraded.tables.map((table) => table.name).sort()).toContain('device_session')
+      expect(await upgraded.device_session.count()).toBe(0)
+    } finally {
+      upgraded.close()
     }
   })
 })
