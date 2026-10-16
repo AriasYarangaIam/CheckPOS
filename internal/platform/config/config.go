@@ -26,6 +26,16 @@ const (
 	// desarrollo (ver docker-compose.yml).
 	DefaultDatabaseURL = "postgres://pos:pos_local_dev@localhost:5433/pos?sslmode=disable"
 
+	// DefaultAppDatabaseURL es el DSN del rol de aplicación `pos_app`: el único rol de
+	// runtime con acceso a las tablas de negocio, siempre bajo RLS de tenant
+	// (docs/DATABASE.md §5.5). La contraseña es el valor de desarrollo local que ya
+	// existe en el repositorio (docker-compose.yml); producción lo rota fuera de banda.
+	DefaultAppDatabaseURL = "postgres://pos_app:pos_local_dev@localhost:5433/pos?sslmode=disable"
+
+	// DefaultAuthDatabaseURL es el DSN del rol pre-auth `pos_auth`: existe para una sola
+	// forma de consulta, la búsqueda de login sobre `users` (docs/DATABASE.md §5.4).
+	DefaultAuthDatabaseURL = "postgres://pos_auth:pos_local_dev@localhost:5433/pos?sslmode=disable"
+
 	defaultHTTPAddr = ":8080"
 	defaultLogLevel = "info"
 )
@@ -36,8 +46,15 @@ type Config struct {
 	HTTPAddr string
 	// LogLevel es uno de debug, info, warn o error, en minúsculas.
 	LogLevel string
-	// DatabaseURL es el DSN de PostgreSQL. Nunca se registra en un log.
+	// DatabaseURL es el DSN de PostgreSQL del rol de migración/dueño. Nunca se registra
+	// en un log.
 	DatabaseURL string
+	// AppDatabaseURL es el DSN del rol de aplicación `pos_app` (datos de negocio bajo
+	// RLS de tenant). Nunca se registra en un log.
+	AppDatabaseURL string
+	// AuthDatabaseURL es el DSN del rol pre-auth `pos_auth` (lectura de `users` para el
+	// login). Nunca se registra en un log.
+	AuthDatabaseURL string
 }
 
 // Load lee el entorno, aplica los valores por defecto y valida el resultado.
@@ -47,9 +64,11 @@ type Config struct {
 // base sin que nadie lo note.
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:    environmentOr("HTTP_ADDR", defaultHTTPAddr),
-		LogLevel:    strings.ToLower(environmentOr("LOG_LEVEL", defaultLogLevel)),
-		DatabaseURL: DatabaseURL(),
+		HTTPAddr:        environmentOr("HTTP_ADDR", defaultHTTPAddr),
+		LogLevel:        strings.ToLower(environmentOr("LOG_LEVEL", defaultLogLevel)),
+		DatabaseURL:     DatabaseURL(),
+		AppDatabaseURL:  AppDatabaseURL(),
+		AuthDatabaseURL: AuthDatabaseURL(),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -76,17 +95,39 @@ func (c Config) Validate() error {
 		return fmt.Errorf("HTTP_ADDR: %q has an invalid port %q", c.HTTPAddr, port)
 	}
 
-	parsed, err := url.Parse(c.DatabaseURL)
+	// Las tres cadenas se validan igual: el rol de migración, el de aplicación y el
+	// pre-auth. Cada error nombra su propia variable, nunca la de otro DSN.
+	for _, dsn := range []struct {
+		variable string
+		value    string
+	}{
+		{variable: "DATABASE_URL", value: c.DatabaseURL},
+		{variable: "DATABASE_APP_URL", value: c.AppDatabaseURL},
+		{variable: "DATABASE_AUTH_URL", value: c.AuthDatabaseURL},
+	} {
+		if err := validateDatabaseURL(dsn.variable, dsn.value); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateDatabaseURL aplica a un DSN la misma regla que Sprint 1 fijó para
+// DATABASE_URL: esquema de PostgreSQL, con host, y un mensaje que nombra la variable
+// culpable.
+func validateDatabaseURL(variable, dsn string) error {
+	parsed, err := url.Parse(dsn)
 	if err != nil {
-		return fmt.Errorf("DATABASE_URL: not a valid URL: %w", err)
+		return fmt.Errorf("%s: not a valid URL: %w", variable, err)
 	}
 	switch parsed.Scheme {
 	case "postgres", "postgresql":
 	default:
-		return fmt.Errorf("DATABASE_URL: unsupported scheme %q (want postgres or postgresql)", parsed.Scheme)
+		return fmt.Errorf("%s: unsupported scheme %q (want postgres or postgresql)", variable, parsed.Scheme)
 	}
 	if parsed.Host == "" {
-		return fmt.Errorf("DATABASE_URL: %q has no host", RedactDSN(c.DatabaseURL))
+		return fmt.Errorf("%s: %q has no host", variable, RedactDSN(dsn))
 	}
 
 	return nil
@@ -99,6 +140,22 @@ func (c Config) Validate() error {
 // cmd/api, cmd/migrate y los tests de integración no puedan apuntar a bases distintas.
 func DatabaseURL() string {
 	return environmentOr("DATABASE_URL", DefaultDatabaseURL)
+}
+
+// AppDatabaseURL devuelve el DSN del rol de aplicación: DATABASE_APP_URL si está
+// definida, y si no el valor por defecto.
+//
+// El rol es distinto del de migración a propósito: `pos_app` no tiene DDL ni `SELECT`
+// sobre `tenants`, y todo su acceso a datos pasa por las políticas de RLS de tenant
+// (docs/DATABASE.md §5.5).
+func AppDatabaseURL() string {
+	return environmentOr("DATABASE_APP_URL", DefaultAppDatabaseURL)
+}
+
+// AuthDatabaseURL devuelve el DSN del rol pre-auth: DATABASE_AUTH_URL si está definida, y
+// si no el valor por defecto.
+func AuthDatabaseURL() string {
+	return environmentOr("DATABASE_AUTH_URL", DefaultAuthDatabaseURL)
 }
 
 // environmentOr devuelve el valor de la variable, o el fallback cuando no está definida
