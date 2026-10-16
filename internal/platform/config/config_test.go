@@ -5,9 +5,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/config"
 )
+
+// testJWTSecret es la clave de firma de las pruebas: 32 bytes o más, y sin ninguna relación
+// con una clave real. clearEnvironment la fija porque JWT_SECRET no tiene valor por defecto;
+// sin ella cada caso de abajo probaría la validación de la firma en lugar de la suya.
+const testJWTSecret = "test-only-signing-key-0123456789abcdef"
 
 // clearEnvironment vacía toda variable que Load lee, para que cada prueba arranque desde
 // los valores por defecto documentados y no desde lo que exporte la terminal del
@@ -19,6 +25,8 @@ func clearEnvironment(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("DATABASE_APP_URL", "")
 	t.Setenv("DATABASE_AUTH_URL", "")
+	t.Setenv("JWT_SECRET", testJWTSecret)
+	t.Setenv("JWT_TTL", "")
 }
 
 func TestLoadUsesDocumentedDefaults(t *testing.T) {
@@ -89,6 +97,76 @@ func TestLoadNormalizesTheLogLevelCase(t *testing.T) {
 	}
 }
 
+// TestJWTSigningConfiguration cubre la configuración del access token
+// (docs/BACKEND.md §2.5, §5.1): el secreto de firma es obligatorio y no tiene valor por
+// defecto —una clave por defecto en el repositorio es un token falsificable por cualquiera
+// que lea el código— y la vida del token tiene un valor documentado.
+func TestJWTSigningConfiguration(t *testing.T) {
+	t.Run("the signing secret is required and has no committed default", func(t *testing.T) {
+		clearEnvironment(t)
+		t.Setenv("JWT_SECRET", "")
+
+		cfg, err := config.Load()
+		if err == nil {
+			t.Fatalf("Load() sin JWT_SECRET: no dio error y devolvió %+v, want un error de validación", cfg)
+		}
+		if !strings.Contains(err.Error(), "JWT_SECRET") {
+			t.Errorf("el error %q no nombra la variable culpable %q", err.Error(), "JWT_SECRET")
+		}
+	})
+
+	t.Run("a signing secret shorter than 32 bytes is rejected", func(t *testing.T) {
+		// docs/BACKEND.md §2.5 fija el piso en 32 bytes para HS256.
+		clearEnvironment(t)
+		t.Setenv("JWT_SECRET", strings.Repeat("a", 31))
+
+		if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "JWT_SECRET") {
+			t.Fatalf("Load() con un secreto de 31 bytes: err = %v, want un error que nombre JWT_SECRET", err)
+		}
+	})
+
+	t.Run("the signing secret comes from the environment", func(t *testing.T) {
+		clearEnvironment(t)
+		t.Setenv("JWT_SECRET", testJWTSecret)
+
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("Load(): error inesperado: %v", err)
+		}
+		if cfg.JWTSecret != testJWTSecret {
+			t.Errorf("JWTSecret = %q, want el valor del entorno", cfg.JWTSecret)
+		}
+	})
+
+	t.Run("the token lifetime defaults to the documented value", func(t *testing.T) {
+		clearEnvironment(t)
+
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("Load(): error inesperado: %v", err)
+		}
+		if cfg.JWTTTL != config.DefaultJWTTTL {
+			t.Errorf("JWTTTL = %v, want el valor por defecto %v", cfg.JWTTTL, config.DefaultJWTTTL)
+		}
+		if config.DefaultJWTTTL <= 0 {
+			t.Errorf("DefaultJWTTTL = %v, want una vida positiva", config.DefaultJWTTTL)
+		}
+	})
+
+	t.Run("the token lifetime comes from JWT_TTL", func(t *testing.T) {
+		clearEnvironment(t)
+		t.Setenv("JWT_TTL", "45m")
+
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("Load(): error inesperado: %v", err)
+		}
+		if cfg.JWTTTL != 45*time.Minute {
+			t.Errorf("JWTTTL = %v, want %v", cfg.JWTTTL, 45*time.Minute)
+		}
+	})
+}
+
 // TestLoadFailsFastOnInvalidValues cubre la regla de fallar rápido: un valor presente
 // pero equivocado se rechaza con un mensaje que nombra la variable culpable, en lugar de
 // caer en silencio al valor por defecto.
@@ -112,6 +190,9 @@ func TestLoadFailsFastOnInvalidValues(t *testing.T) {
 		{name: "auth database engine", variable: "DATABASE_AUTH_URL", value: "mysql://pos_auth@localhost:3306/pos", wantField: "DATABASE_AUTH_URL"},
 		{name: "auth database url without a host", variable: "DATABASE_AUTH_URL", value: "postgres:///pos", wantField: "DATABASE_AUTH_URL"},
 		{name: "auth database url that is not a url", variable: "DATABASE_AUTH_URL", value: "not a connection string", wantField: "DATABASE_AUTH_URL"},
+		{name: "token lifetime that is not a duration", variable: "JWT_TTL", value: "banana", wantField: "JWT_TTL"},
+		{name: "token lifetime of zero", variable: "JWT_TTL", value: "0s", wantField: "JWT_TTL"},
+		{name: "negative token lifetime", variable: "JWT_TTL", value: "-1h", wantField: "JWT_TTL"},
 	}
 
 	for _, tc := range cases {
