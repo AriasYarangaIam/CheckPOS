@@ -12,12 +12,14 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -38,6 +40,18 @@ const (
 
 	defaultHTTPAddr = ":8080"
 	defaultLogLevel = "info"
+
+	// DefaultJWTTTL es la vida por defecto del access token. docs/BACKEND.md §2.5 la
+	// propone sin fijarla, así que la elección se documenta: doce horas cubren un turno
+	// completo de mostrador sin obligar a un re-login en medio de la jornada. La ventana
+	// que habilita el mostrador sin red es la del dispositivo
+	// (`devices.offline_session_valid_until`, al menos 7 días) y no esta (§5.2).
+	DefaultJWTTTL = 12 * time.Hour
+
+	// minJWTSecretBytes es el piso de la clave de firma: docs/BACKEND.md §2.5 pide 32
+	// bytes o más para HS256. Una clave más corta que el tamaño de salida del hash es
+	// adivinable por fuerza bruta y vuelve falsificable cualquier token.
+	minJWTSecretBytes = 32
 )
 
 // Config es la configuración del proceso, ya validada.
@@ -55,6 +69,13 @@ type Config struct {
 	// AuthDatabaseURL es el DSN del rol pre-auth `pos_auth` (lectura de `users` para el
 	// login). Nunca se registra en un log.
 	AuthDatabaseURL string
+	// JWTSecret firma y verifica el access token. No tiene valor por defecto a propósito:
+	// una clave commiteada es pública, y con ella cualquiera firma un token de cualquier
+	// tenant (docs/BACKEND.md §2.5). Nunca se registra en un log.
+	JWTSecret string
+	// JWTTTL es la vida del access token. No es la ventana offline del PIN, que vive en
+	// `devices.offline_session_valid_until` (docs/BACKEND.md §2.5, §5.2).
+	JWTTTL time.Duration
 }
 
 // Load lee el entorno, aplica los valores por defecto y valida el resultado.
@@ -69,6 +90,20 @@ func Load() (Config, error) {
 		DatabaseURL:     DatabaseURL(),
 		AppDatabaseURL:  AppDatabaseURL(),
 		AuthDatabaseURL: AuthDatabaseURL(),
+		// JWT_SECRET no pasa por environmentOr: no hay respaldo que devolver. Ausente es un
+		// error de validación, no una caída silenciosa a una clave conocida.
+		JWTSecret: strings.TrimSpace(os.Getenv("JWT_SECRET")),
+		JWTTTL:    DefaultJWTTTL,
+	}
+
+	// JWT_TTL sí tiene valor por defecto, y uno presente pero ilegible es un error: un
+	// error de tipeo no puede convertirse en un token con otra vida de la pedida.
+	if raw := strings.TrimSpace(os.Getenv("JWT_TTL")); raw != "" {
+		ttl, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("JWT_TTL: %q is not a duration such as \"12h\": %w", raw, err)
+		}
+		cfg.JWTTTL = ttl
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -108,6 +143,20 @@ func (c Config) Validate() error {
 		if err := validateDatabaseURL(dsn.variable, dsn.value); err != nil {
 			return err
 		}
+	}
+
+	// La firma del access token: obligatoria y con un piso de longitud. El mensaje nombra
+	// la variable y dice por qué no hay valor por defecto, porque el operador que la vea va
+	// a estar mirando un arranque fallido (docs/BACKEND.md §2.5).
+	if c.JWTSecret == "" {
+		return errors.New("JWT_SECRET: required and has no default (a committed signing key is a forgeable token); set it to at least 32 bytes of entropy")
+	}
+	if len(c.JWTSecret) < minJWTSecretBytes {
+		return fmt.Errorf("JWT_SECRET: %d bytes is shorter than the %d-byte minimum (docs/BACKEND.md §2.5)", len(c.JWTSecret), minJWTSecretBytes)
+	}
+
+	if c.JWTTTL <= 0 {
+		return fmt.Errorf("JWT_TTL: %v is not a positive lifetime", c.JWTTTL)
 	}
 
 	return nil

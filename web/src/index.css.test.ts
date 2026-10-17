@@ -308,6 +308,47 @@ describe('design tokens (docs/DESIGN.md §2.1)', () => {
   })
 })
 
+/*
+ * §2.3:76 declara la sombra de las teclas, `shadow-keypad`. No es una copia del
+ * valor: los desplazamientos y los colores se firman en orden y se comparan
+ * contra el documento, de modo que mover un desplazamiento o cambiar una
+ * opacidad falle acá y no en una revisión visual.
+ */
+function shadowSignature(value: string): string {
+  const tokens = value.match(/\d+(?:\.\d+)?px|rgba?\([^)]*\)|\b0\b/g) ?? []
+
+  return tokens
+    .map((token) => (token.startsWith('rgb') ? canonicalColor(token) : token))
+    .join('|')
+}
+
+function keypadShadowFromDoc(): string {
+  const match = DESIGN_DOC().match(/`shadow-keypad`:\s*`([^`]+)`/)
+
+  if (match?.[1] === undefined) {
+    throw new Error('docs/DESIGN.md §2.3 ya no declara `shadow-keypad`')
+  }
+
+  return match[1]
+}
+
+describe('keypad elevation (docs/DESIGN.md §2.3)', () => {
+  it('declares shadow-keypad with the value the document fixes', () => {
+    const declared = declaredValue(cssWithoutComments(INDEX_CSS()), '--shadow-keypad')
+
+    expect(declared, 'index.css no declara --shadow-keypad').toBeDefined()
+    expect(shadowSignature(declared ?? '')).toBe(shadowSignature(keypadShadowFromDoc()))
+  })
+
+  it('consumes the keypad elevation in the numpad keys', () => {
+    // El token entra al CSS publicado porque una utilidad lo usa: la tecla del
+    // numpad ergonómico. Un token declarado y sin consumidor se poda del bundle.
+    const numpad = readFileSync(join(sourceDir(), 'components', 'ErgonomicNumpad.tsx'), 'utf8')
+
+    expect(numpad).toContain('shadow-keypad')
+  })
+})
+
 describe('tabular typography (docs/DESIGN.md §2.2)', () => {
   it('declares the whole §2.2 scale with its line height and weight', () => {
     const scale = typeScaleFromDoc()
