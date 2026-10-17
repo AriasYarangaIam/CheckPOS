@@ -5,13 +5,14 @@
 // que cmd/api, cmd/migrate y los tests de integración no puedan divergir: un solo DSN,
 // un solo juego de migraciones y una sola forma de aplicarlas.
 //
-// Queda deliberadamente fuera de este paquete, hasta el sprint que lo necesite:
+// Dos cosas de la conexión se deciden FUERA de este paquete, y esta es la razón de cada una:
 //
-//   - el ayudante de transacción que fija el GUC del tenant con SET LOCAL. La seguridad
-//     frente a connection poolers vive ahí, no en el tamaño del pool (docs/BACKEND.md
-//     §7.7), y llega con el RLS de Sprint 2.
-//   - el rol por privilegio de la matriz de concesiones (docs/DATABASE.md §5.5): hasta
-//     que existan los roles pos_*, el proceso se conecta con el rol de desarrollo.
+//   - el tamaño del pool: lo que la seguridad exige no es un número sino el `SET LOCAL` por
+//     transacción (docs/BACKEND.md §7.7), y ese vive en el ayudante de tenant (tenant.go).
+//   - el rol por privilegio de la matriz de concesiones (docs/DATABASE.md §5.5): la aserción
+//     que rechaza un rol con `rolsuper` o `rolbypassrls` es AssertLeastPrivilegeRole, en
+//     runtime_role.go, y la llama cmd/api —no New— porque los tests de integración construyen
+//     pools con el rol dueño para migrar y leer el catálogo de una base desechable.
 package postgres
 
 import (
