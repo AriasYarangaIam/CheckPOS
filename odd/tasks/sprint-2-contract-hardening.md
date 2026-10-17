@@ -37,17 +37,23 @@ detecta un intercambio de roles entre pools (fallo silencioso, no de fuga).
   políticas ya son las correctas.
 
 ## Tareas
-- [ ] `CH-1` — Documento de feature + espejo en engram, y correcciones in-place a
-      `docs/DATABASE.md` (delta de líneas = 0).
-- [ ] `CH-2` — `fix(api)`: `AssertExpectedRole` por pool (`pos_app`/`pos_auth`) al
-      arrancar + test de integración que falle primero + una frase en `.env.example`.
-- [ ] `CH-3` — `test(web)`: spy de fetch que guarda 0 llamadas en el camino de PIN
-      incorrecto (fail-first en un commit, luego el fix `CH-4` no lo necesita; ver
-      orden abajo).
-- [ ] `CH-4` — `fix(web)`: re-evaluar el veredicto `unlocked` al recargar sesión y
-      downgrade a `window-expired`/`unbound` según corresponda, con test.
-- [ ] `CH-5` — Prueba de que cada corta se sostiene sola (build + suites por commit) y
-      `tareas` del documento reflejan el estado real.
+- [x] `CH-1` — Documento de feature + espejo en engram, y correcciones in-place a
+      `docs/DATABASE.md` (delta de líneas = 0). → commits `b3de2e6` + `7078591`
+      (`numstat 5/5`: punteros `:NNN` externos intactos).
+- [x] `CH-2` — `fix(api)`: `AssertExpectedRole` por pool (`pos_app`/`pos_auth`) al
+      arrancar + test de integración que falla primero + frase en `.env.example`.
+      → commit `092186c` (RED observado; mutación invierte la comparación y el test
+      falla en ambos lados; suite Go 6/6 ok).
+- [x] `CH-3` — `test(web)`: spy de fetch que guarda 0 llamadas en el camino de PIN
+      incorrecto. → commit `14b885e` (163→164 verdes; la falsificación con el fetch
+      inyectado en `deviceSession.ts` rompe el guard en 1/15 de ese archivo).
+      Hallazgo de propio paso: `deviceSession.ts` no importa ningún cliente HTTP
+      (solo WebCrypto PBKDF2 + Dexie); `fetch` solo existe en `bindDeviceSession`.
+- [x] `CH-4` — `fix(web)`: re-evaluar el veredicto `unlocked` al recargar sesión.
+      → commit `e52abee` (2 RED observados: fila vencida y fila borrada bajan a
+      `refused/window-expired` o `refused/no-session`; 166/166 verdes).
+- [x] `CH-5` — Prueba de que cada corto se sostiene solo (build + suites por commit).
+      → tabla en "Evidencia".
 
 ## Método (orden de trabajo)
 1. `CH-1` (inline, lo cerró el orquestador): feature doc + espejo; 5 ediciones in-place
@@ -77,10 +83,14 @@ detecta un intercambio de roles entre pools (fallo silencioso, no de fuga).
 - Previsión de líneas: ~240 (docs) + ~180 (Go) + ~110 (web) ≈ 530 total, 5 commits;
   cada corta es una unidad revisable. El apilado sobre merge-commit mantiene el diff.
 
-## Verificación / evidencia por corta
-- `CH-1`: `git diff --numstat docs/DATABASE.md` = (5,5)… delta de líneas 0 — punteros
-  `:NNN` externos intactos; lectura estructural de las 5 líneas resultantes.
-- `CH-2`: suite Go verde (6 pkgs); falla esperada en el primer intento RED; prueba
-  standalone (build ok en ese commit, 6 ok).
-- `CH-3/4`: vitest verde (163 + los nuevos); RED observado en el commit del test.
-- `CH-5`: tabla por commit.
+## Verificación / evidencia por corto
+- `CH-1`: `git show --numstat 7078591` → `5 5 docs/DATABASE.md` — delta de líneas 0,
+  punteros `:NNN` externos (DESIGN.md/FRONTEND.md) intactos.
+- `CH-2`: commit `092186c` (+136). RED = build del primer test `undefined:
+  postgres.AssertExpectedRole`; suite Go 6/6 ok; mutación → el test falla por ambos
+  caminos (`accepted ... 401 para siempre` y `rechazado y no debería`).
+- `CH-3/4`: vitest 163 → 164 (`14b885e`) → 166 (`e52abee`); RED de `e52abee`
+  (2 tests) observado y luego verde; falsificación guard de red mordiendo (1 fail).
+- `CH-5`: cada uno de los 5 commits, checked-out aislado, pasa `go build` y
+  `go test ./... -count=1` (6 ok / 0 FAIL); los que tocan web, además, vitest verde.
+- Estado final de `develop` tras el merge: pendiente (usuario mergea).
