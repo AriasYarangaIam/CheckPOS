@@ -73,8 +73,9 @@ func ApplyMigrations(ctx context.Context, dsn string) error {
 
 // New construye el pool de conexiones sin esperar a que PostgreSQL responda.
 //
-// El proceso arranca aunque la base esté caída, y GET /readyz lo informa: la vida y la
-// preparación son preguntas distintas. Un DSN inválido sí falla aquí, porque un error de
+// Construir el pool no falla porque la base esté caída: es cmd/api quien decide si eso
+// impide arrancar (hoy sí, porque AssertLeastPrivilegeRole no puede probar con qué rol
+// habla sin base; ver su comentario). Un DSN inválido sí falla aquí, porque un error de
 // configuración no se arregla solo.
 func New(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
