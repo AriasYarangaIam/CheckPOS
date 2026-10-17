@@ -3,7 +3,7 @@
 //
 // # La regla exacta que aplica este escáner
 //
-// Recorre todos los archivos `.go` del árbol del repositorio y, en cada uno, aplica dos reglas:
+// Recorre todos los archivos `.go` del árbol del repositorio y, en cada uno, aplica tres reglas:
 //
 //  1. IMPORT: un archivo que NO sea `_test.go` y que esté fuera del paquete auxiliar no puede
 //     importar un cliente de Redis. La lista de módulos que se consideran cliente de Redis es
@@ -14,18 +14,26 @@
 //     también es un hallazgo. Las oraciones en prosa de este repositorio escriben siempre
 //     `tenant: ` con espacio detrás, y por eso quedan fuera de la regla; la cabeza de una clave
 //     —`tenant:` + id + `:` + partes— nunca lleva ese espacio.
+//  3. CONCATENACIÓN: ningún archivo fuera del paquete auxiliar puede ARMAR el prefijo plegando
+//     literales contiguos. `"tenant" + ":" + id` es un hallazgo aunque ningún literal contenga
+//     `tenant:` por separado, y `"tenant" + ": " + id` no lo es, por la misma razón que en la
+//     regla anterior: el espacio detrás es prosa. El pliegue no cruza un operando que no sea un
+//     literal, así que la forma que toma el prefijo de otra constante o de un argumento sigue
+//     siendo un límite declarado (ver abajo). Un literal que por sí solo ya delata el prefijo
+//     no se informa dos veces: la regla 2 ya lo informó.
 //
-// El paquete auxiliar (`internal/platform/tenantkey`) es el único lugar exento de las dos reglas:
-// es el que define el prefijo y el que tiene por delante la construcción de claves. Un archivo
-// que necesite una clave usa `tenantkey.Key` y no toca el literal.
+// El paquete auxiliar (`internal/platform/tenantkey`) es el único lugar exento de las tres
+// reglas: es el que define el prefijo y el que tiene por delante la construcción de claves. Un
+// archivo que necesite una clave usa `tenantkey.Key` y no toca el literal.
 //
 // # Qué NO detecta, deliberadamente
 //
-// El escáner es un regex sobre el AST, no un teorema. Lo que deja pasar, y que un revisor tiene
-// que mirar a ojo:
+// El escáner es un plegado de literales sobre el AST, no un teorema. Lo que deja pasar, y que un
+// revisor tiene que mirar a ojo:
 //
-//   - un prefijo armado por partes (`"tenant" + ":" + id`), leído de otra constante o pasado como
-//     argumento;
+//   - un prefijo que sale de OTRA CONSTANTE, de una variable o del resultado de una llamada
+//     (`head + ":" + id`, con `const head = "tenant"`): el pliegue cruza literales contiguos, no
+//     valores, y plegar un valor exigiría ejecutar el programa;
 //   - el prefijo con espacio detrás (`fmt.Sprintf("tenant: %s", id)`), que es indistinguible de
 //     la prosa;
 //   - un cliente de Redis con otra ruta de módulo (un fork, un wrapper que lo reexporta, un
@@ -202,6 +210,80 @@ func pageKey(id [16]byte) (string, error) { return tenantkey.Key(id, "catalog", 
 	}
 }
 
+// TestTheReviewCatchesAPiecewisePrefix prueba la tercera regla por mutación: el prefijo armado
+// plegando literales contiguos es un hallazgo aunque ningún literal lo contenga por separado, y
+// el mismo prefijo con espacio detrás sigue siendo prosa.
+//
+// Mide tres cosas que la regla anterior no puede ver, y una que sí: la forma literal del mismo
+// delito se informa UNA vez —por la regla 2, no dos veces—, porque contar dos veces el mismo
+// hallazgo inflaría el reporte sin agregar información.
+func TestTheReviewCatchesAPiecewisePrefix(t *testing.T) {
+	root := t.TempDir()
+
+	// El delito: la mitad del encabezado en cada literal. Ninguno de los dos contiene `tenant:`
+	// pegado a lo que sigue, así que la regla de los literales no lo ve.
+	writeFixture(t, root, "internal/catalog/piecewise.go", `package catalog
+
+func cursorKey(id string) string { return "tenant" + ":" + id + ":cursor" }
+`)
+
+	// El mismo delito en la forma que la regla 2 ya informaba: se marca una sola vez.
+	writeFixture(t, root, "internal/catalog/literal.go", `package catalog
+
+func pageKey(id string) string { return "tenant:" + id + ":page" }
+`)
+
+	// Prosa por partes: el espacio detrás del prefijo la deja fuera de las dos reglas, igual que
+	// en la forma literal.
+	writeFixture(t, root, "internal/catalog/prose.go", `package catalog
+
+const doc = "el catalogo de un tenant" + ": " + "sin prefijo no hay aislamiento"
+`)
+
+	result, err := scanTenantKeys(root)
+	if err != nil {
+		t.Fatalf("escanear la muestra: %v", err)
+	}
+
+	if result.files != 3 {
+		t.Fatalf("el escáner revisó %d archivos, want los 3 de la muestra", result.files)
+	}
+
+	// La ubicación exacta importa: el reporte tiene que decir archivo y línea del hallazgo.
+	got := findingLocations(result)
+	want := []string{"internal/catalog/literal.go:3", "internal/catalog/piecewise.go:3"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("hallazgos = %v, want %v", got, want)
+	}
+
+	if len(result.findings) != len(want) {
+		t.Errorf("el escáner informó %d hallazgo(s), want %d: la regla de la concatenación no repite el hallazgo del literal", len(result.findings), len(want))
+	}
+}
+
+// TestTheReviewStopsAtANonLiteralOperand documenta el límite que queda después de la tercera
+// regla: el pliegue cruza literales contiguos, no valores. Un prefijo que vive en una constante
+// sigue necesitando ojo humano, y este es el borde exacto.
+func TestTheReviewStopsAtANonLiteralOperand(t *testing.T) {
+	root := t.TempDir()
+
+	writeFixture(t, root, "internal/catalog/constant_head.go", `package catalog
+
+const head = "tenant"
+
+func key(id string) string { return head + ":" + id }
+`)
+
+	result, err := scanTenantKeys(root)
+	if err != nil {
+		t.Fatalf("escanear la muestra: %v", err)
+	}
+
+	if len(result.findings) != 0 {
+		t.Errorf("hallazgos = %v, want ninguno: el pliegue no cruza un operando que no sea un literal, y esa es la forma que este límite declara", result.findings)
+	}
+}
+
 // TestTheReviewCatchesARedisClientOutsideTheHelper prueba la otra mitad por mutación: un cliente
 // de Redis importado fuera del paquete auxiliar en un archivo que no es de prueba es un hallazgo;
 // el mismo import en un archivo de prueba, o dentro del paquete auxiliar, no lo es.
@@ -316,7 +398,27 @@ func findingPaths(result scanResult) []string {
 	return paths
 }
 
-// scanTenantKeys recorre root y devuelve los hallazgos de las dos reglas. Es el escáner entero, y
+// findingLocations devuelve `archivo:línea` de cada hallazgo, ordenado y sin repetir. Es la forma
+// del reporte que un revisor lee, y por eso las muestras afirman sobre ella y no sólo sobre el
+// conjunto de archivos.
+func findingLocations(result scanResult) []string {
+	seen := map[string]bool{}
+	var locations []string
+
+	for _, finding := range result.findings {
+		location := fmt.Sprintf("%s:%d", finding.path, finding.line)
+		if seen[location] {
+			continue
+		}
+		seen[location] = true
+		locations = append(locations, location)
+	}
+
+	sort.Strings(locations)
+	return locations
+}
+
+// scanTenantKeys recorre root y devuelve los hallazgos de las TRES reglas. Es el escáner entero, y
 // su contrato —qué mira, qué deja pasar— está en el comentario de arriba del archivo.
 func scanTenantKeys(root string) (scanResult, error) {
 	var result scanResult
@@ -375,7 +477,7 @@ func scanTenantKeys(root string) (scanResult, error) {
 	return result, nil
 }
 
-// reviewSource aplica las dos reglas a un archivo.
+// reviewSource aplica las tres reglas a un archivo.
 //
 // Un archivo que no parsea es un hallazgo y no un archivo salteado: lo que no se puede leer no se
 // puede revisar, y dar por bueno un fuente ilegible sería exactamente la forma en que una revisión
@@ -428,7 +530,124 @@ func reviewSource(relative string, source []byte) []finding {
 		return true
 	})
 
+	// Regla 3: el prefijo ARMADO POR PARTES. El recorrido es preorden, así que una cadena de `+`
+	// se informa en su nodo más externo y los `+` internos quedan marcados: sin eso, `("a" + "b")
+	// + c` produciría un hallazgo por subexpresión.
+	var folded = make(map[ast.Node]bool)
+	ast.Inspect(file, func(node ast.Node) bool {
+		binary, ok := node.(*ast.BinaryExpr)
+		if !ok || binary.Op != token.ADD {
+			return true
+		}
+		if folded[binary] {
+			return true
+		}
+
+		if finding, ok := concatenatedPrefixFinding(relative, fileset, binary, concatenationOperands(binary, folded)); ok {
+			findings = append(findings, finding)
+		}
+		return true
+	})
+
 	return findings
+}
+
+// concatenationOperands aplana una cadena de `+` y marca cada `+` interno como ya leído, para
+// que el recorrido preorden informe la cadena una sola vez.
+//
+// Un operando que no sea un `+` se devuelve tal cual: lo que el pliegue de la regla 3 decide
+// después es si ese operando es un literal de cadena o no.
+func concatenationOperands(binary *ast.BinaryExpr, folded map[ast.Node]bool) []ast.Expr {
+	folded[binary] = true
+
+	var operands []ast.Expr
+	var flatten func(expr ast.Expr)
+	flatten = func(expr ast.Expr) {
+		nested, ok := expr.(*ast.BinaryExpr)
+		if !ok || nested.Op != token.ADD {
+			operands = append(operands, expr)
+			return
+		}
+		folded[nested] = true
+		flatten(nested.X)
+		flatten(nested.Y)
+	}
+	flatten(binary.X)
+	flatten(binary.Y)
+
+	return operands
+}
+
+// concatenatedPrefixFinding decide si una cadena de concatenaciones arma el prefijo del tenant.
+//
+// Plegar literales contiguos es lo que atrapa `"tenant" + ":" + id`: por separado ningún literal
+// contiene `tenant:` pegado a lo que sigue, y juntos sí. El pliegue NO cruza un operando que no
+// sea un literal —una constante, una variable, el resultado de una llamada—, así que la forma que
+// toma el prefijo de un valor que vive en otra parte sigue siendo un límite declarado del escáner.
+//
+// Un literal que por sí solo ya delata el prefijo no se informa otra vez: la regla 2 ya lo
+// informó, y repetirlo contaría el mismo hallazgo dos veces.
+func concatenatedPrefixFinding(relative string, fileset *token.FileSet, binary *ast.BinaryExpr, operands []ast.Expr) (finding, bool) {
+	var (
+		texts    = make([]string, 0, len(operands))
+		constant = make([]bool, 0, len(operands))
+	)
+
+	for _, operand := range operands {
+		value, ok := stringLiteral(operand)
+		if !ok {
+			texts = append(texts, "")
+			constant = append(constant, false)
+			continue
+		}
+		if handBuildsThePrefix(value) {
+			return finding{}, false
+		}
+
+		texts = append(texts, value)
+		constant = append(constant, true)
+	}
+
+	// El pliegue: los literales contiguos son un solo texto constante, porque `"tenant"` y `":"`
+	// no son dos partes de la clave sino la mitad del encabezado cada uno.
+	for index := 0; index < len(texts); {
+		if !constant[index] {
+			index++
+			continue
+		}
+
+		assembled := texts[index]
+		next := index + 1
+		for next < len(texts) && constant[next] {
+			assembled += texts[next]
+			next++
+		}
+
+		if handBuildsThePrefix(assembled) {
+			return finding{
+				path:   relative,
+				line:   fileset.Position(binary.Pos()).Line,
+				detail: fmt.Sprintf("arma el prefijo %q concatenando literales: la clave del tenant se arma con tenantkey.Key", tenantPrefixToken),
+			}, true
+		}
+		index = next
+	}
+
+	return finding{}, false
+}
+
+// stringLiteral devuelve el valor de un literal de cadena y si el operando lo era.
+func stringLiteral(operand ast.Expr) (string, bool) {
+	literal, ok := operand.(*ast.BasicLit)
+	if !ok || literal.Kind != token.STRING {
+		return "", false
+	}
+
+	value, err := strconv.Unquote(literal.Value)
+	if err != nil {
+		return "", false
+	}
+	return value, true
 }
 
 // handBuildsThePrefix informa si la cadena contiene el prefijo pegado a lo que sigue, que es la

@@ -106,6 +106,35 @@ JOIN pg_class c ON c.oid = i.inhrelid
 WHERE i.inhparent = 'public.sales'::regclass
   AND NOT has_table_privilege('pos_app', c.oid, 'SELECT')`
 
+// salesPartitionsWithoutTenantPolicySQL cuenta las particiones de `sales` a las que les falta
+// el aislamiento del padre: RLS en falso, o ninguna política.
+//
+// Es un contador distinto del de concesiones, y no un detalle suyo, porque los dos modos de
+// falla son OPUESTOS. La concesión ausente falla cerrado: la lectura directa de la partición
+// responde 42501. La política ausente con la concesión presente FUGA, y no falla nada. Medido
+// en este contenedor sobre una base migrada, con una partición recién creada —relrowsecurity
+// falso, cero políticas, `SELECT` concedido a pos_app— y una fila de cada tenant:
+//
+//	pos_app, GUC en el tenant A, lectura DIRECTA de la partición  -> 2 filas (los dos tenants)
+//	pos_app, GUC en el tenant A, misma lectura por el PADRE      -> 1 fila
+//
+// La consecuencia para la pre-creación mensual de W6-DB-2 está registrada como comentario en
+// 20261016000001_roles_and_grants.sql y en 20261016000002_tenant_rls.sql. Este contador es lo
+// que la vuelve exigible por CI: una partición que sólo reciba el espejo de concesiones hace
+// fallar esta aserción, en lugar de dejar la fuga anotada en una nota que nadie relee.
+const salesPartitionsWithoutTenantPolicySQL = `
+SELECT count(*)
+FROM pg_inherits i
+JOIN pg_class c ON c.oid = i.inhrelid
+WHERE i.inhparent = 'public.sales'::regclass
+  AND (NOT c.relrowsecurity
+       OR NOT EXISTS (
+           SELECT 1
+           FROM pg_policies p
+           WHERE p.schemaname = 'public'
+             AND p.tablename = c.relname
+       ))`
+
 // TestGrantsContract verifica la matriz de docs/DATABASE.md §5.5 contra el catálogo y contra
 // el comportamiento real de los roles. La idempotencia de la creación de roles queda probada
 // por la propia corrida: cada prueba de integración migra su base desechable y los roles
@@ -202,6 +231,26 @@ func TestGrantsContract(t *testing.T) {
 			JOIN pg_class c ON c.oid = i.inhrelid
 			WHERE i.inhparent = 'public.sales'::regclass`); got == 0 {
 			t.Fatal("sales no tiene particiones: la prueba del espejo de concesiones no probó nada")
+		}
+	})
+
+	t.Run("every sales partition carries the tenant RLS and its policies", func(t *testing.T) {
+		// El espejo de concesiones de arriba mide el acceso directo, no el aislamiento: una
+		// partición con `SELECT` y sin políticas se lee entera, y esa es justo la forma que
+		// tendría una pre-creación mensual (W6-DB-2) que copiara las concesiones y nada más.
+		// Esta aserción es la que convierte ese riesgo registrado en una barrera de CI.
+		if got := queryCount(t, db, salesPartitionsWithoutTenantPolicySQL); got != 0 {
+			t.Errorf("%d partición(es) de sales sin RLS o sin políticas de tenant, want 0: una partición con SELECT y sin política devuelve las filas de todos los tenants (ver la nota de W6-DB-2 en 20261016000002_tenant_rls.sql)", got)
+		}
+
+		// No vacuidad: con cero particiones el contador de arriba daría 0 sin haber medido
+		// nada, que es exactamente el verde vacío que esta prueba tiene que impedir.
+		if got := queryCount(t, db, `
+			SELECT count(*)
+			FROM pg_inherits i
+			JOIN pg_class c ON c.oid = i.inhrelid
+			WHERE i.inhparent = 'public.sales'::regclass`); got == 0 {
+			t.Fatal("sales no tiene particiones: la prueba del espejo de políticas no probó nada")
 		}
 	})
 

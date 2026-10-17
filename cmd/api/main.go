@@ -100,6 +100,19 @@ func run() error {
 	}
 	defer pool.Close()
 
+	// El rol detrás del DSN es una precondición de TODO el aislamiento del sprint, y su único
+	// modo de falla es silencioso: `pos` —el POSTGRES_USER del contenedor de desarrollo— tiene
+	// `rolsuper` y `rolbypassrls`, y FORCE RLS no liga a un superusuario. Con ese DSN cada
+	// consulta devolvería las filas de todos los tenants sin un solo error, y nada más lo
+	// detecta: los tests de integración arman sus propios pools y nunca pasan por acá.
+	//
+	// Se evalúa antes de armar el servidor, y una base que no responde también es un rechazo de
+	// arranque: la aserción es una precondición de corrección, no un sondeo de salud —para eso
+	// está /readyz— y un proceso que no puede probar con qué rol habla no atiende.
+	if err := postgres.AssertLeastPrivilegeRole(ctx, pool, "DATABASE_APP_URL"); err != nil {
+		return err
+	}
+
 	// El pool pre-auth es distinto a propósito: `pos_auth` tiene `SELECT` sobre `users` y
 	// sobre ninguna otra tabla, y su política permisiva es lo que permite resolver el
 	// teléfono del login antes de que exista un JWT (docs/BACKEND.md §4.2, §5.4).
@@ -108,6 +121,12 @@ func run() error {
 		return err
 	}
 	defer authPool.Close()
+
+	// La misma aserción sobre el segundo DSN: `pos_auth` es un rol de la matriz de concesiones
+	// y un error de tipeo puede apuntarlo al DSN dueño tan fácilmente como al primero.
+	if err := postgres.AssertLeastPrivilegeRole(ctx, authPool, "DATABASE_AUTH_URL"); err != nil {
+		return err
+	}
 
 	readiness := dependencies{app: pool, auth: authPool}
 
@@ -130,10 +149,14 @@ func run() error {
 		return err
 	}
 
-	// El pool de datos entra al helper de transacción de tenant: es la única ruta de datos de la
-	// aplicación y `POST /auth/device-bind` es su primer consumidor de producción (docs/BACKEND.md
-	// §7.7). El tipo no expone ninguna forma de consultar sin contexto, y el ping de /readyz vive
-	// sobre el pool crudo porque no es una consulta de tenant.
+	// El pool de datos entra al helper de transacción de tenant, que es la disciplina de TIPOS
+	// de la ruta de datos de negocio: `TenantPool` no ofrece ninguna forma de consultar sin
+	// contexto (internal/platform/postgres/tenant.go), y `POST /auth/device-bind` es su primer
+	// consumidor de producción (docs/BACKEND.md §7.7). No es la única ruta de datos de la
+	// aplicación, ni puede serlo: la lectura pre-auth del login corre contra `users` fuera de
+	// `WithTenant` —no hay token todavía, así que no hay contexto que fijar, y así lo manda
+	// docs/DATABASE.md §5.4— y el ping de /readyz vive sobre el pool crudo porque no es una
+	// consulta de tenant.
 	deviceBind, err := identity.NewDeviceBindHandler(identity.NewPostgresDeviceBinder(postgres.NewTenantPool(pool)), logger)
 	if err != nil {
 		return err
