@@ -21,5 +21,8 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // jsdom no trae `crypto.subtle` y el verificador local del PIN deriva con
+    // PBKDF2 (ver `src/test-setup.ts`).
+    setupFiles: ['./src/test-setup.ts'],
   },
 })

@@ -13,16 +13,40 @@ import (
 // lado, y se devuelve en la respuesta (docs/BACKEND.md §7.9).
 const RequestIDHeader = "X-Request-Id"
 
-// NewRouter arma el servidor HTTP del proceso: los dos sondeos de operación y un
-// fallback con el sobre de error.
+// Option ajusta el mux del proceso. Es la costura por la que un módulo monta sus rutas sin
+// que este paquete tenga que conocerlas ni que el módulo invente otro transporte.
+type Option func(*http.ServeMux)
+
+// WithRoutes monta las rutas de un módulo en el mux del proceso.
 //
-// Sprint 1 no expone ningún endpoint de negocio (docs/BACKEND.md §10.1): el router existe
-// para probar que el proceso único arranca, responde y se apaga, y para dar a los sprints
-// siguientes un lugar donde montar rutas sin inventar otro transporte.
-func NewRouter(logger *slog.Logger, checker ReadinessChecker) http.Handler {
+// El módulo registra patrones completos —método y ruta, como "POST /auth/login"— sobre el
+// mismo mux que los dos sondeos. El fallback "/" se registra después: un módulo que registre
+// "/" lo pisa y el mux entra en pánico al arrancar, que es la forma correcta de fallar.
+func WithRoutes(mount func(*http.ServeMux)) Option {
+	return func(mux *http.ServeMux) {
+		if mount == nil {
+			return
+		}
+		mount(mux)
+	}
+}
+
+// NewRouter arma el servidor HTTP del proceso: los dos sondeos de operación, las rutas que
+// cada módulo monte por opción y un fallback con el sobre de error.
+//
+// Sprint 1 lo dejó existiendo para probar que el proceso único arranca, responde y se apaga,
+// y para dar a los sprints siguientes un lugar donde montar rutas sin inventar otro
+// transporte (docs/BACKEND.md §10.1). Sprint 2 usa esa costura para `POST /auth/login`: sin
+// opciones, el router es exactamente el de antes.
+func NewRouter(logger *slog.Logger, checker ReadinessChecker, options ...Option) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", HealthHandler())
 	mux.Handle("GET /readyz", ReadinessHandler(checker))
+
+	for _, option := range options {
+		option(mux)
+	}
+
 	// El patrón "/" es el fallback de todo lo que no coincida arriba.
 	mux.Handle("/", NotFoundHandler())
 

@@ -51,6 +51,15 @@
   --shadow-glow-emerald: 0 8px 24px -4px rgb(16 185 129 / 0.35);
 
   /*
+   * Elevación de las teclas del numpad (DESIGN.md §2.3:76, `shadow-keypad`).
+   * Es el token que la fila de sombras del contrato declara para las teclas y
+   * que ninguna utilidad había consumido todavía: el numpad ergonómico es su
+   * primer consumidor. El valor se compara contra el documento en
+   * `src/index.css.test.ts`, no se copia.
+   */
+  --shadow-keypad: 0 2px 4px rgb(0 0 0 / 0.04), 0 1px 2px rgb(0 0 0 / 0.06);
+
+  /*
    * Tipografía (DESIGN.md §2.2). Los nombres `Inter Variable` y
    * `JetBrains Mono Variable` son los `font-family` que declara
    * `@fontsource-variable/*`, que viaja empaquetado con la PWA: la app no pide

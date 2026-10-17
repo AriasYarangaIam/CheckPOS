@@ -1,5 +1,5 @@
-// Package identity implementa el módulo Identity: el registro de inquilinos y las
-// cuentas que cierran ventas.
+// Package identity reúne el primitivo de credenciales, el emisor/verificador del access
+// token y el acceso pre-auth del login.
 //
 // Tablas que posee: `tenants`, `users` y `devices` (docs/DATABASE.md §4, grupo 1).
 //
@@ -12,6 +12,7 @@
 // módulo tampoco importa el repositorio de otro: si otro módulo necesita un producto o un
 // usuario, lo pide a su servicio, nunca a su SQL (docs/BACKEND.md §2.4).
 //
-// Sprint 1 solo declara la frontera. La emisión y verificación del JWT, el device-bind y
-// el PIN de la ventana offline son Sprint 2 (docs/BACKEND.md §10.2).
+// Sprint 2 (W2-BE-1) entrega acá la emisión y la verificación del access token y
+// `POST /auth/login`, que lee `users` por el rol dedicado `pos_auth`. El device-bind y el
+// PIN de la ventana offline llegan en el corte siguiente (docs/BACKEND.md §10.2).
 package identity
