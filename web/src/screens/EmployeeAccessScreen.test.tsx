@@ -5,7 +5,7 @@ import Dexie from 'dexie'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { saveDeviceSession } from '@/auth/deviceSession'
+import { clearDeviceSession, saveDeviceSession } from '@/auth/deviceSession'
 import { POS_DATABASE_NAME, PosDatabase } from '@/db/posDatabase'
 import { EmployeeAccessScreen } from '@/screens/EmployeeAccessScreen'
 
@@ -275,6 +275,66 @@ describe('EmployeeAccessScreen', () => {
 
     await screen.findByText('Sesión desbloqueada')
     expect(screen.queryByRole('dialog')).toBeNull()
+
+    database.close()
+  })
+
+  it('downgrades the unlocked verdict when the reloaded session window expired', async () => {
+    /*
+     * El desbloqueo concedido no es un pasaporte perenne: cuando la pantalla
+     * releer la sesión, el veredicto se reevalúa sobre la fila fresca. Si la
+     * marca de esa fila venció, la pantalla vuelve al rechazo honesto en lugar
+     * de sostener un `Sesión desbloqueada` que ya no es cierto.
+     */
+    const database = await boundDatabase()
+
+    render(<EmployeeAccessScreen database={database} />)
+    await waitForReadyNumpad()
+
+    typePin(PIN)
+    await screen.findByText('Sesión desbloqueada')
+
+    // La fila que el dispositivo tiene deja de ser válida: outsider de esta
+    // unidad de trabajo, es lo que haría una expiración real del servidor.
+    await saveDeviceSession(
+      { deviceId: DEVICE_ID, userId: USER_ID, validUntil: EXPIRED_WINDOW, pin: PIN },
+      database,
+    )
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'))
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText('Sesión desbloqueada')).toBeNull()
+    })
+
+    expect(screen.getByText(/La sesión offline de este dispositivo venció/)).toBeTruthy()
+    expect(screen.getByText(/el intento en línea sigue disponible/)).toBeTruthy()
+
+    database.close()
+  })
+
+  it('downgrades the unlocked verdict when the reloaded session row disappeared', async () => {
+    const database = await boundDatabase()
+
+    render(<EmployeeAccessScreen database={database} />)
+    await waitForReadyNumpad()
+
+    typePin(PIN)
+    await screen.findByText('Sesión desbloqueada')
+
+    await clearDeviceSession(database)
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'))
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText('Sesión desbloqueada')).toBeNull()
+    })
+
+    expect(screen.getByText(/Este dispositivo todavía no tiene una sesión offline/)).toBeTruthy()
 
     database.close()
   })

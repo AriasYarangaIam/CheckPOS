@@ -637,7 +637,7 @@ The following tables carry `FORCE RLS` (the table owner is bound too — 5.5):
 
 ### 5.2 Transaction-scoped tenant context — pooler safety
 
-Every `pos_app` transaction begins by extracting `tenant_id` from the JWT and issuing `SET LOCAL app.current_tenant_id = '<tenant_id>'`. `SET LOCAL` scopes the GUC to the current transaction — it resets automatically at transaction end. This is load-bearing for connection-pooler safety: a session-scoped `SET` would leak the tenant context to the next request that reuses the pooled connection; `SET LOCAL` cannot. The RLS policies on every table in 5.1 read `current_setting('app.current_tenant_id')::uuid` in their USING and WITH CHECK expressions (5.3), so a missing or mismatched GUC yields zero rows and zero writes — fail-closed.
+Every `pos_app` transaction begins by extracting `tenant_id` from the JWT and issuing `SET LOCAL app.current_tenant_id = '<tenant_id>'`. `SET LOCAL` scopes the GUC to the current transaction — it resets automatically at transaction end. This is load-bearing for connection-pooler safety: a session-scoped `SET` would leak the tenant context to the next request that reuses the pooled connection; `SET LOCAL` cannot. The RLS policies on every table in 5.1 read `current_setting('app.current_tenant_id')::uuid` in their USING and WITH CHECK expressions (5.3), so a missing or mismatched GUC yields zero rows and zero writes, fail-closed. Measured: with NO GUC at all the literal predicate raises — `current_setting` on an absent settings key errors with 42704/22P02, an error, not an empty filter — so the tenant-RLS migration sets a database-level default (`ALTER DATABASE ... SET app.current_tenant_id = '<nil UUID>'`): the placeholder feeds the predicate a UUID that matches no tenant, turning every missing-GUC case into zero rows and zero writes instead of an error. Application code stays equivalent — `WithTenant` always issues `SET LOCAL` first.
 
 ### 5.3 Policy templates — expression fragments
 
@@ -652,7 +652,7 @@ The USING fragment filters the visible rows; the WITH CHECK fragment rejects any
 
 Signup and login run before any JWT exists. Two dedicated bootstrap paths cover them:
 
-- **Signup** — one transaction: INSERT `tenants` (the new business) → `SET LOCAL app.current_tenant_id = <new tenant's id>` → INSERT `users` RETURNING. The readback uses INSERT ... RETURNING — it needs no SELECT grant on `tenants` (the `pos_app` role holds no SELECT on `tenants` by design, 5.5). The GUC is set inside the same transaction, so the INSERT into `users` is already tenant-scoped when it runs.
+- **Signup** — one transaction: INSERT `tenants` (the new business) → `SET LOCAL app.current_tenant_id = <new tenant's id>` → INSERT `users`. Corrected 2026-10-16 against the measured grant matrix: the original text claimed INSERT ... RETURNING needs no SELECT grant on `tenants`, but PostgreSQL requires SELECT on every column a `RETURNING` list returns, and `pos_app` holds zero SELECT on `tenants` — the probe test records the actual result, `42501` permission denied. The application therefore generates the tenant's UUIDv7 id itself (2.2) and inserts without RETURNING: every value it needs comes from the request. The GUC is set inside the same transaction, so the INSERT into `users` is already tenant-scoped when it runs.
 - **Login** — a dedicated `pos_auth` role carries a role-targeted policy on `users`: `FOR SELECT TO pos_auth USING (true)`. The login endpoint connects as `pos_auth` and runs ONLY the phone + password_hash lookup. No other table is readable by `pos_auth`; no tenant context is required. The role exists for exactly one query shape.
 
 ### 5.5 Grant matrix
@@ -664,9 +664,9 @@ Signup and login run before any JWT exists. Two dedicated bootstrap paths cover 
 | `pos_maintenance` | — | — | — | `idempotency_keys` (MD-3 retention, via the RLS maintenance path); schedules partition pre-creation (MD-1) — the partition DDL itself executes under the owner/migration role (DDL split, F9) |
 | owner/migration | — | — | — | — |
 
-`owner/migration` — DDL only. FORCE RLS binds the table owner too; no runtime role holds BYPASSRLS. All schema changes run through this role; no data-plane queries.
+`owner/migration` — DDL only. Corrected 2026-10-16 against measurement: `ENABLE FORCE ROW LEVEL SECURITY` binds a table owner only when that owner is neither superuser nor holds `rolbypassrls` — the local development container's owner (`pos`) is both superuser and BYPASSRLS and reads across tenants with no GUC, which is precisely how its bootstrap works. The invariant this section must hold for production is enforced, not assumed: `owner/migration` never runs as superuser (no runtime role holds BYPASSRLS), and `cmd/api` refuses to start when any runtime role is superuser or BYPASSRLS. All schema changes run through this role; no data-plane queries.
 
-The business-tables definition (F14): the eleven tables in 5.1. `pos_app` SELECT is granted to exactly these eleven, enumerated explicitly — no wildcard, no `tenants`, no global tables.
+The business-tables definition (F14): the eleven tables in 5.1. `pos_app` SELECT is granted to exactly these eleven, enumerated explicitly — no wildcard, no `tenants`, no global tables. Measured: table partitions inherit neither grants nor RLS policies from their parent, so every `sales` partition is granted and mirrored by the migrations' `DO` loop and CI asserts each partition carries `relrowsecurity` plus the tenant policies; a partition created outside that path without its own policies is a live leak, which is exactly what the W6-DB-2 partition mechanism must prevent.
 
 ### 5.6 Global-catalog exception
 
@@ -674,7 +674,7 @@ The business-tables definition (F14): the eleven tables in 5.1. `pos_app` SELECT
 
 ### 5.7 S1-2 fail-then-pass alignment
 
-The isolation story lines up with SPRINTS S1-2. Before RLS is in place, a cross-tenant SELECT against any of the eleven tables returns rows from other tenants — the test fails by design (no JWT tenant context → no predicate → every row visible). After RLS and the grant matrix are applied, the same query — without `SET LOCAL app.current_tenant_id` — returns zero rows, because the USING fragment filters to the (unset) GUC value, and `pos_app` holds no BYPASSRLS. The test passes. The fail-then-pass shape is the verification contract: the schema is wrong if the test passes before RLS, and the RLS is wrong if the test fails after.
+The isolation story lines up with SPRINTS S1-2. Before RLS is in place, a cross-tenant SELECT against any of the eleven tables returns rows from other tenants — the test fails by design (no JWT tenant context → no predicate → every row visible). After RLS and the grant matrix are applied, the same query — without `SET LOCAL app.current_tenant_id` — returns zero rows, because the database-level nil-UUID default feeds the predicate a UUID that matches no tenant and `pos_app` holds no BYPASSRLS (measured: with that default absent, the predicate raises 42704/22P02 rather than filtering). The test passes. The fail-then-pass shape is the verification contract: the schema is wrong if the test passes before RLS, and the RLS is wrong if the test fails after.
 
 ## 6. Partitioning — sales ledger (MD-1)
 

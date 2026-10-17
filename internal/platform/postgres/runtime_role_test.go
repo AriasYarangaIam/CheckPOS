@@ -80,6 +80,85 @@ func TestTheAssertionRefusesAPrivilegedRole(t *testing.T) {
 	})
 }
 
+// TestTheExpectedRoleAssertionRefusesASwappedDSN fija el complemento de la aserción de
+// privilegio mínimo (W1): no alcanza con que el rol no sea privilegiado, cada pool tiene
+// que conectar con SU rol de la matriz de concesiones. Un DSN intercambiado —el DSN de
+// `pos_app` dentro de DATABASE_AUTH_URL— es válido, alcanza una base viva y no es
+// privilegiado, así que sin esta aserción el proceso arrancaría, /readyz respondería 200
+// y el login devolvería 401 para siempre.
+func TestTheExpectedRoleAssertionRefusesASwappedDSN(t *testing.T) {
+	if testing.Short() {
+		t.Skip("prueba de integración: necesita el contenedor local de PostgreSQL (docker compose up -d); se salta con -short (SPRINTS.md §8)")
+	}
+
+	db := newThrowawayDatabase(t)
+	database := queryOneString(t, db, "SELECT current_database()")
+
+	ctx := context.Background()
+
+	t.Run("the auth variable pointing at the app DSN is refused and names variable and role", func(t *testing.T) {
+		// El DSN de `pos_app` en DATABASE_AUTH_URL: ningún privilegio de más, ninguna
+		// falla de conexión y aun así una caída total de autenticación disfrazada de
+		// arranque sano. El rechazo tiene que nombrar qué variable apuntó mal y con qué
+		// rol conectó de verdad, para que el operador no tenga que adivinar.
+		pool := runtimePool(t, config.AppDatabaseURL(), database)
+
+		err := postgres.AssertExpectedRole(ctx, pool, "DATABASE_AUTH_URL", "pos_auth")
+		if err == nil {
+			t.Fatalf("el DSN de %s dentro de DATABASE_AUTH_URL fue aceptado: /readyz quedaria en 200 con el login en 401 para siempre (W1)", config.RedactDSN(config.AppDatabaseURL()))
+		}
+
+		message := err.Error()
+		for _, want := range []string{"DATABASE_AUTH_URL", "pos_app", "pos_auth"} {
+			if !strings.Contains(message, want) {
+				t.Errorf("el mensaje no nombra %s: %q", want, message)
+			}
+		}
+	})
+
+	t.Run("each runtime pool connected as its expected role passes", func(t *testing.T) {
+		// Sin este lado, un helper que rechazara cualquier par pasaría la prueba de arriba.
+		for _, expected := range []struct {
+			variable string
+			dsn      string
+			role     string
+		}{
+			{variable: "DATABASE_APP_URL", dsn: config.AppDatabaseURL(), role: "pos_app"},
+			{variable: "DATABASE_AUTH_URL", dsn: config.AuthDatabaseURL(), role: "pos_auth"},
+		} {
+			err := postgres.AssertExpectedRole(ctx, runtimePool(t, expected.dsn, database), expected.variable, expected.role)
+			if err != nil {
+				t.Errorf("%s conectado como %s fue rechazado y no debería: %v", expected.variable, expected.role, err)
+			}
+		}
+	})
+
+	t.Run("a cancelled context surfaces as an error instead of silence", func(t *testing.T) {
+		pool := runtimePool(t, config.AppDatabaseURL(), database)
+
+		failedCtx, cancel := context.WithCancel(ctx)
+		cancel()
+
+		err := postgres.AssertExpectedRole(failedCtx, pool, "DATABASE_APP_URL", "pos_app")
+		if err == nil {
+			t.Fatal("un contexto cancelado fue aceptado: la aserción no puede probar con qué rol habla el pool")
+		}
+		if !strings.Contains(err.Error(), "DATABASE_APP_URL") {
+			t.Errorf("el mensaje no nombra la variable: %q", err.Error())
+		}
+	})
+
+	t.Run("a missing pool is refused", func(t *testing.T) {
+		err := postgres.AssertExpectedRole(context.Background(), nil, "DATABASE_APP_URL", "pos_app")
+		if err == nil {
+			t.Fatal("un pool nulo fue aceptado: la aserción no probó nada")
+		}
+		if !strings.Contains(err.Error(), "DATABASE_APP_URL") {
+			t.Errorf("el mensaje no nombra la variable: %q", err.Error())
+		}
+	})
+}
+
 // TestTheAssertionRefusesAMissingPool fija el borde sin base: un pool ausente no se puede
 // interrogar, así que la aserción falla en lugar de dejarlo pasar. Es la misma decisión que el
 // resto del paquete toma con un pool nulo (internal/platform/postgres/tenant.go).
