@@ -87,10 +87,32 @@ export function EmployeeAccessScreen({
           if (!mounted.current) return
 
           setSession(row)
-          // Un desbloqueo ya concedido no se revierte por releer la sesión; un
-          // rechazo sí se reevalúa, para que una renovación en línea —lo que el
-          // `online` anuncia— no deje el motivo colgado en pantalla.
-          setVerdict((current) => (current?.status === 'unlocked' ? current : null))
+
+          // Un rechazo sí se reevalúa, para que una renovación en línea —lo que
+          // el `online` anuncia— no deje el motivo colgado en pantalla.
+          setVerdict((current) => {
+            if (current?.status !== 'unlocked') return null
+
+            // `unlocked` tampoco se queda de gratis: se reevalúa sobre la fila
+            // fresca. Solo sobrevive si la fila vigente sigue dentro de la
+            // ventana; si la fila desapareció o su marca venció, el veredicto
+            // baja al rechazo honesto de la misma taxonomía, así que una fila
+            // borrada o vencida no deja el mostrador abierto por releer la
+            // sesión.
+            const now = new Date()
+
+            if (offlineSessionVerdict(row, now) === 'allowed') return current
+
+            return {
+              status: 'refused',
+              reason:
+                row === null
+                  ? 'no-session'
+                  : offlineSessionVerdict(row, now) === 'expired'
+                    ? 'window-expired'
+                    : 'window-unreadable',
+            }
+          })
         })
         .catch(() => {
           // Sin IndexedDB la sesión no se puede leer: se trata como ausente, que
