@@ -268,6 +268,26 @@ describe('attemptOfflineUnlock', () => {
     database.close()
   })
 
+  it('rejects a wrong PIN without issuing any network call', async () => {
+    const database = await boundDatabase()
+    const noNetwork = vi.fn()
+
+    vi.stubGlobal('fetch', noNetwork)
+
+    await expect(attemptOfflineUnlock('0001', NOW, database)).resolves.toEqual({
+      status: 'rejected',
+      reason: 'wrong-pin',
+    })
+
+    // El rechazo de un PIN incorrecto es un cómputo local: falla en la
+    // derivación, antes de que exista transporte. La prueba es una guarda
+    // contra la falsificación conocida (verificación W3): un `fetch`
+    // inyectado en esta rama quedaría en evidencia acá.
+    expect(noNetwork).not.toHaveBeenCalled()
+
+    database.close()
+  })
+
   it('refuses past the window before deriving, so the PIN stops mattering', async () => {
     const database = await boundDatabase()
 
