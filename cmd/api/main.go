@@ -113,6 +113,15 @@ func run() error {
 		return err
 	}
 
+	// El privilegio mínimo no basta: un DSN válido y poco privilegiado puede ser el DSN
+	// EQUIVOCADO. Cada pool acredita su rol exacto de la matriz de concesiones, así que un
+	// DSN intercambiado o mal escrito detiene el arranque en vez de terminar en la caída
+	// silenciosa de autenticación que describe W1: /readyz en 200 y 401 en cada endpoint
+	// para siempre.
+	if err := postgres.AssertExpectedRole(ctx, pool, "DATABASE_APP_URL", "pos_app"); err != nil {
+		return err
+	}
+
 	// El pool pre-auth es distinto a propósito: `pos_auth` tiene `SELECT` sobre `users` y
 	// sobre ninguna otra tabla, y su política permisiva es lo que permite resolver el
 	// teléfono del login antes de que exista un JWT (docs/BACKEND.md §4.2, §5.4).
@@ -125,6 +134,12 @@ func run() error {
 	// La misma aserción sobre el segundo DSN: `pos_auth` es un rol de la matriz de concesiones
 	// y un error de tipeo puede apuntarlo al DSN dueño tan fácilmente como al primero.
 	if err := postgres.AssertLeastPrivilegeRole(ctx, authPool, "DATABASE_AUTH_URL"); err != nil {
+		return err
+	}
+
+	// La misma pareja sobre el segundo pool, con su rol esperado: acá un tipeo puede
+	// apuntar el DSN pre-auth a cualquier otro DSN válido del clúster.
+	if err := postgres.AssertExpectedRole(ctx, authPool, "DATABASE_AUTH_URL", "pos_auth"); err != nil {
 		return err
 	}
 

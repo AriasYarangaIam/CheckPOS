@@ -85,3 +85,44 @@ func AssertLeastPrivilegeRole(ctx context.Context, pool *pgxpool.Pool, variable 
 		"%s: the pool authenticates as the role %q, which has %s: %w; FORCE ROW LEVEL SECURITY binds a plain table owner but not a superuser, so a plain read of any tenant table would return every tenant's rows without an error (docs/DATABASE.md §5.5)",
 		variable, role, strings.Join(attributes, " and "), ErrPrivilegedRuntimeRole)
 }
+
+// currentUserSQL lee el rol autenticado de ESTA conexión. `current_user` se compara
+// EXACTO, sin ignorar mayúsculas, porque los roles de la matriz de concesiones se crean
+// en minúsculas (docs/DATABASE.md §5.5): una comparación que normalizara la caja podría
+// aceptar un nombre que PostgreSQL nunca creó.
+const currentUserSQL = "SELECT current_user"
+
+// AssertExpectedRole comprueba que el rol detrás de pool sea exactamente expectedRole y
+// devuelve un error que nombra variable —la de la que salió el DSN de ese pool— y el rol
+// con el que realmente conectó cuando no lo es.
+//
+// Es el complemento de AssertLeastPrivilegeRole y cierra el modo de falla W1: un DSN
+// intercambiado es válido, alcanza una base viva, no es privilegiado y por eso ninguna
+// de las aserciones por separado lo detecta. Poner el DSN de `pos_app` en
+// DATABASE_AUTH_URL arrancaría el proceso, dejaría /readyz en 200 y contestaría 401 a
+// cada login para siempre: fail-closed, pero indistinguible de una caída total de
+// autenticación.
+//
+// La comparación es caso-sensible a propósito —los roles del clúster existentes corren
+// en minúsculas— y el error lo deja explícito al nombrar el rol conectado y el esperado
+// tal como se compararon.
+//
+// Un fallo de conexión o de consulta también es un error: sin respuesta de PostgreSQL
+// el rol no se puede leer, y un proceso que no puede probar con qué habla no está en
+// condiciones de atender tráfico de tenants.
+func AssertExpectedRole(ctx context.Context, pool *pgxpool.Pool, variable, expectedRole string) error {
+	if pool == nil {
+		return fmt.Errorf("%s: the connection pool is nil, so the role behind it cannot be checked", variable)
+	}
+
+	var role string
+	if err := pool.QueryRow(ctx, currentUserSQL).Scan(&role); err != nil {
+		return fmt.Errorf("%s: ask PostgreSQL which role this pool authenticates as: %w", variable, err)
+	}
+
+	if role == expectedRole {
+		return nil
+	}
+
+	return fmt.Errorf("%s points to user %q, expected %q (swapped pools or a wrong DSN)", variable, role, expectedRole)
+}
