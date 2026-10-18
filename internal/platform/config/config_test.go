@@ -25,6 +25,7 @@ func clearEnvironment(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("DATABASE_APP_URL", "")
 	t.Setenv("DATABASE_AUTH_URL", "")
+	t.Setenv("DATABASE_PLATFORM_URL", "")
 	t.Setenv("JWT_SECRET", testJWTSecret)
 	t.Setenv("JWT_TTL", "")
 }
@@ -52,6 +53,9 @@ func TestLoadUsesDocumentedDefaults(t *testing.T) {
 	if cfg.AuthDatabaseURL != config.DefaultAuthDatabaseURL {
 		t.Errorf("AuthDatabaseURL = %q, want el valor por defecto del rol pos_auth %q", cfg.AuthDatabaseURL, config.DefaultAuthDatabaseURL)
 	}
+	if cfg.PlatformDatabaseURL != config.DefaultPlatformDatabaseURL {
+		t.Errorf("PlatformDatabaseURL = %q, want el valor por defecto del rol pos_platform %q", cfg.PlatformDatabaseURL, config.DefaultPlatformDatabaseURL)
+	}
 }
 
 func TestLoadPrefersTheEnvironmentOverDefaults(t *testing.T) {
@@ -61,6 +65,7 @@ func TestLoadPrefersTheEnvironmentOverDefaults(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://someone:secret@db.internal:5432/other?sslmode=require")
 	t.Setenv("DATABASE_APP_URL", "postgres://pos_app:secret@db.internal:5432/other?sslmode=require")
 	t.Setenv("DATABASE_AUTH_URL", "postgres://pos_auth:secret@db.internal:5432/other?sslmode=require")
+	t.Setenv("DATABASE_PLATFORM_URL", "postgres://pos_platform:secret@db.internal:5432/other?sslmode=require")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -81,6 +86,9 @@ func TestLoadPrefersTheEnvironmentOverDefaults(t *testing.T) {
 	}
 	if cfg.AuthDatabaseURL != "postgres://pos_auth:secret@db.internal:5432/other?sslmode=require" {
 		t.Errorf("AuthDatabaseURL = %q, want el valor del entorno", cfg.AuthDatabaseURL)
+	}
+	if cfg.PlatformDatabaseURL != "postgres://pos_platform:secret@db.internal:5432/other?sslmode=require" {
+		t.Errorf("PlatformDatabaseURL = %q, want el valor del entorno", cfg.PlatformDatabaseURL)
 	}
 }
 

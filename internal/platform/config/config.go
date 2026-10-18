@@ -38,6 +38,12 @@ const (
 	// forma de consulta, la búsqueda de login sobre `users` (docs/DATABASE.md §5.4).
 	DefaultAuthDatabaseURL = "postgres://pos_auth:pos_local_dev@localhost:5433/pos?sslmode=disable"
 
+	// DefaultPlatformDatabaseURL es el DSN del rol de catálogo global `pos_platform`
+	// (Sprint 3, W3-BE-2): su única consulta es la mediación del GTIN sobre las tablas
+	// globales, que viven fuera del RLS de tenant y a las que pos_app no puede entrar
+	// (docs/DATABASE.md §5.5, §5.6, §7.7).
+	DefaultPlatformDatabaseURL = "postgres://pos_platform:pos_local_dev@localhost:5433/pos?sslmode=disable"
+
 	defaultHTTPAddr = ":8080"
 	defaultLogLevel = "info"
 
@@ -69,6 +75,9 @@ type Config struct {
 	// AuthDatabaseURL es el DSN del rol pre-auth `pos_auth` (lectura de `users` para el
 	// login). Nunca se registra en un log.
 	AuthDatabaseURL string
+	// PlatformDatabaseURL es el DSN del rol de catálogo global `pos_platform` (mediación
+	// read-only del GTIN, W3-BE-2). Nunca se registra en un log.
+	PlatformDatabaseURL string
 	// JWTSecret firma y verifica el access token. No tiene valor por defecto a propósito:
 	// una clave commiteada es pública, y con ella cualquiera firma un token de cualquier
 	// tenant (docs/BACKEND.md §2.5). Nunca se registra en un log.
@@ -87,9 +96,10 @@ func Load() (Config, error) {
 	cfg := Config{
 		HTTPAddr:        environmentOr("HTTP_ADDR", defaultHTTPAddr),
 		LogLevel:        strings.ToLower(environmentOr("LOG_LEVEL", defaultLogLevel)),
-		DatabaseURL:     DatabaseURL(),
-		AppDatabaseURL:  AppDatabaseURL(),
-		AuthDatabaseURL: AuthDatabaseURL(),
+		DatabaseURL:          DatabaseURL(),
+		AppDatabaseURL:       AppDatabaseURL(),
+		AuthDatabaseURL:      AuthDatabaseURL(),
+		PlatformDatabaseURL:  PlatformDatabaseURL(),
 		// JWT_SECRET no pasa por environmentOr: no hay respaldo que devolver. Ausente es un
 		// error de validación, no una caída silenciosa a una clave conocida.
 		JWTSecret: strings.TrimSpace(os.Getenv("JWT_SECRET")),
@@ -139,6 +149,7 @@ func (c Config) Validate() error {
 		{variable: "DATABASE_URL", value: c.DatabaseURL},
 		{variable: "DATABASE_APP_URL", value: c.AppDatabaseURL},
 		{variable: "DATABASE_AUTH_URL", value: c.AuthDatabaseURL},
+		{variable: "DATABASE_PLATFORM_URL", value: c.PlatformDatabaseURL},
 	} {
 		if err := validateDatabaseURL(dsn.variable, dsn.value); err != nil {
 			return err
@@ -199,6 +210,14 @@ func DatabaseURL() string {
 // (docs/DATABASE.md §5.5).
 func AppDatabaseURL() string {
 	return environmentOr("DATABASE_APP_URL", DefaultAppDatabaseURL)
+}
+
+// PlatformDatabaseURL devuelve el DSN del rol de catálogo global `pos_platform`:
+// DATABASE_PLATFORM_URL si está definida, y si no el valor por defecto (W3-BE-2, docs/
+// DATABASE.md §5.6). El rol existe SOLO para la mediación del GTIN: no es otro rol de
+// negocio, y las concesiones que describa roles_and_grants.sql valen acá y nada más.
+func PlatformDatabaseURL() string {
+	return environmentOr("DATABASE_PLATFORM_URL", DefaultPlatformDatabaseURL)
 }
 
 // AuthDatabaseURL devuelve el DSN del rol pre-auth: DATABASE_AUTH_URL si está definida, y
