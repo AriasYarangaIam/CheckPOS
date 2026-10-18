@@ -33,6 +33,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/AriasYarangaIam/CheckPOS/internal/catalog"
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/config"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
@@ -177,6 +178,13 @@ func run() error {
 		return err
 	}
 
+	// El catálogo por tenant (Sprint 3, W3-BE-1) corre sobre el MISMO pool de negocio
+	// (pos_app + WithTenant). El store es el único camino de datos de `products`.
+	products, err := catalog.NewProductsHandler(catalog.NewPostgresProductStore(postgres.NewTenantPool(pool)), logger)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpx.NewRouter(logger, readiness, httpx.WithRoutes(func(mux *http.ServeMux) {
@@ -185,6 +193,11 @@ func run() error {
 			// tenant: leerlo del cuerpo o de un encabezado no existe en el contrato
 			// (ARCHITECTURE.md:23).
 			mux.Handle("POST /auth/device-bind", identity.RequireAccessToken(issuer, deviceBind))
+			// El catálogo por tenant: las tres rutas de /products detrás del MISMO middleware,
+			// y el tenant y el usuario salen de los claims del token para las tres.
+			mux.Handle("GET /products", identity.RequireAccessToken(issuer, products))
+			mux.Handle("POST /products", identity.RequireAccessToken(issuer, products))
+			mux.Handle("PATCH /products/{id}", identity.RequireAccessToken(issuer, products))
 		})),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
