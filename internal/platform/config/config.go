@@ -44,6 +44,17 @@ const (
 	// (docs/DATABASE.md §5.5, §5.6, §7.7).
 	DefaultPlatformDatabaseURL = "postgres://pos_platform:pos_local_dev@localhost:5433/pos?sslmode=disable"
 
+	// DefaultObjectStorageDir es el directorio del almacenamiento de objetos de las fotos
+	// (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3). Es relativo al directorio de trabajo del
+	// proceso: un almacenamiento de objetos real (SDK externo) lo pisará con su propia
+	// configuración, sin cambiar la forma de la URL que este módulo devuelve.
+	DefaultObjectStorageDir = "data/photos"
+
+	// DefaultObjectStorageURL es la base pública con la que el store local arma las URLs
+	// que devuelve: es la base con la que el cliente referencia la foto después en
+	// photo_url dentro del cuerpo de POST /products (§10.3).
+	DefaultObjectStorageURL = "http://localhost:8080"
+
 	defaultHTTPAddr = ":8080"
 	defaultLogLevel = "info"
 
@@ -78,6 +89,13 @@ type Config struct {
 	// PlatformDatabaseURL es el DSN del rol de catálogo global `pos_platform` (mediación
 	// read-only del GTIN, W3-BE-2). Nunca se registra en un log.
 	PlatformDatabaseURL string
+	// ObjectStorageDir es el directorio del almacenamiento de objetos de las fotos
+	// (W3-BE-3). No lleva credenciales, así que su vacío es un defecto de arrranque que la
+	// validación del proceso no niega (docs/BACKEND.md §10.3).
+	ObjectStorageDir string
+	// ObjectStorageURL es la base pública de las URLs de foto que devuelve el upload
+	// (W3-BE-3): el cliente la referencia después en photo_url (docs/BACKEND.md §10.3).
+	ObjectStorageURL string
 	// JWTSecret firma y verifica el access token. No tiene valor por defecto a propósito:
 	// una clave commiteada es pública, y con ella cualquiera firma un token de cualquier
 	// tenant (docs/BACKEND.md §2.5). Nunca se registra en un log.
@@ -100,6 +118,8 @@ func Load() (Config, error) {
 		AppDatabaseURL:       AppDatabaseURL(),
 		AuthDatabaseURL:      AuthDatabaseURL(),
 		PlatformDatabaseURL:  PlatformDatabaseURL(),
+		ObjectStorageDir:     ObjectStorageDir(),
+		ObjectStorageURL:     ObjectStorageURL(),
 		// JWT_SECRET no pasa por environmentOr: no hay respaldo que devolver. Ausente es un
 		// error de validación, no una caída silenciosa a una clave conocida.
 		JWTSecret: strings.TrimSpace(os.Getenv("JWT_SECRET")),
@@ -218,6 +238,19 @@ func AppDatabaseURL() string {
 // negocio, y las concesiones que describa roles_and_grants.sql valen acá y nada más.
 func PlatformDatabaseURL() string {
 	return environmentOr("DATABASE_PLATFORM_URL", DefaultPlatformDatabaseURL)
+}
+
+// ObjectStorageDir devuelve el directorio del almacenamiento de objetos de las fotos:
+// OBJECT_STORAGE_DIR si está definida y si no el valor por defecto (W3-BE-3, docs/
+// BACKEND.md §2.5 ya anuncia los nombres OBJECT_STORAGE_* de este módulo).
+func ObjectStorageDir() string {
+	return environmentOr("OBJECT_STORAGE_DIR", DefaultObjectStorageDir)
+}
+
+// ObjectStorageURL devuelve la base pública de las URLs de foto: OBJECT_STORAGE_URL si
+// está definida y si no la del propio proceso en desarrollo local (docs/BACKEND.md §10.3).
+func ObjectStorageURL() string {
+	return environmentOr("OBJECT_STORAGE_URL", DefaultObjectStorageURL)
 }
 
 // AuthDatabaseURL devuelve el DSN del rol pre-auth: DATABASE_AUTH_URL si está definida, y

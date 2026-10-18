@@ -26,6 +26,8 @@ func clearEnvironment(t *testing.T) {
 	t.Setenv("DATABASE_APP_URL", "")
 	t.Setenv("DATABASE_AUTH_URL", "")
 	t.Setenv("DATABASE_PLATFORM_URL", "")
+	t.Setenv("OBJECT_STORAGE_DIR", "")
+	t.Setenv("OBJECT_STORAGE_URL", "")
 	t.Setenv("JWT_SECRET", testJWTSecret)
 	t.Setenv("JWT_TTL", "")
 }
@@ -56,6 +58,12 @@ func TestLoadUsesDocumentedDefaults(t *testing.T) {
 	if cfg.PlatformDatabaseURL != config.DefaultPlatformDatabaseURL {
 		t.Errorf("PlatformDatabaseURL = %q, want el valor por defecto del rol pos_platform %q", cfg.PlatformDatabaseURL, config.DefaultPlatformDatabaseURL)
 	}
+	if cfg.ObjectStorageDir != config.DefaultObjectStorageDir {
+		t.Errorf("ObjectStorageDir = %q, want el directorio por defecto %q", cfg.ObjectStorageDir, config.DefaultObjectStorageDir)
+	}
+	if cfg.ObjectStorageURL != config.DefaultObjectStorageURL {
+		t.Errorf("ObjectStorageURL = %q, want la base pública por defecto %q", cfg.ObjectStorageURL, config.DefaultObjectStorageURL)
+	}
 }
 
 func TestLoadPrefersTheEnvironmentOverDefaults(t *testing.T) {
@@ -66,6 +74,8 @@ func TestLoadPrefersTheEnvironmentOverDefaults(t *testing.T) {
 	t.Setenv("DATABASE_APP_URL", "postgres://pos_app:secret@db.internal:5432/other?sslmode=require")
 	t.Setenv("DATABASE_AUTH_URL", "postgres://pos_auth:secret@db.internal:5432/other?sslmode=require")
 	t.Setenv("DATABASE_PLATFORM_URL", "postgres://pos_platform:secret@db.internal:5432/other?sslmode=require")
+	t.Setenv("OBJECT_STORAGE_DIR", "srv/photos")
+	t.Setenv("OBJECT_STORAGE_URL", "http://objects.internal:9000")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -89,6 +99,12 @@ func TestLoadPrefersTheEnvironmentOverDefaults(t *testing.T) {
 	}
 	if cfg.PlatformDatabaseURL != "postgres://pos_platform:secret@db.internal:5432/other?sslmode=require" {
 		t.Errorf("PlatformDatabaseURL = %q, want el valor del entorno", cfg.PlatformDatabaseURL)
+	}
+	if cfg.ObjectStorageDir != "srv/photos" {
+		t.Errorf("ObjectStorageDir = %q, want el valor del entorno", cfg.ObjectStorageDir)
+	}
+	if cfg.ObjectStorageURL != "http://objects.internal:9000" {
+		t.Errorf("ObjectStorageURL = %q, want el valor del entorno", cfg.ObjectStorageURL)
 	}
 }
 

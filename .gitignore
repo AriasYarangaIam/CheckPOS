@@ -11,6 +11,9 @@
 # Local environment (holds DATABASE_URL; .env.example is the committed template)
 .env
 
+# Local object storage (photos module writes under data/ at runtime)
+/data/
+
 # Frontend PWA (web/): dependencies and build output are never committed
 node_modules/
 web/dist/

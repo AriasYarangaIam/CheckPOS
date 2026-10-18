@@ -20,6 +20,8 @@
 //	POST /products          —la digitalización del catálogo vive en `products`, con uom
 //	PATCH /products/{id}     columna tipada, stock inmutable por la superficie y LWW
 //	GET  /gtin-lookup       mediación read-only del catálogo global (Sprint 3, W3-BE-2)
+//	POST /photos            upload multipart: 200 con la URL del objeto, sin bytes en la
+//	                        base (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3)
 //
 // SIGINT y SIGTERM disparan un apagado ordenado: el servidor deja de aceptar conexiones
 // y espera las peticiones en vuelo antes de cerrar los pools.
@@ -39,6 +41,7 @@ import (
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/catalog"
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
+	"github.com/AriasYarangaIam/CheckPOS/internal/photos"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/config"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/logging"
@@ -215,6 +218,19 @@ func run() error {
 		return err
 	}
 
+	// El almacenamiento de objetos de las fotos (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3):
+	// el store local es la caja fuerte del contrato y el handler NO toca la base —la URL
+	// que devuelve es la única pieza que el cliente mandará después en photo_url.
+	photoStore, err := photos.NewLocalStore(cfg.ObjectStorageDir, cfg.ObjectStorageURL)
+	if err != nil {
+		return err
+	}
+
+	photosHandler, err := photos.NewPhotosHandler(photoStore, logger)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpx.NewRouter(logger, readiness, httpx.WithRoutes(func(mux *http.ServeMux) {
@@ -231,6 +247,9 @@ func run() error {
 			// La mediación read-only del catálogo global: autenticada como el resto, y
 			// respondiendo a lo sumo UN producto por gtin (docs/DATABASE.md §5.6).
 			mux.Handle("GET /gtin-lookup", identity.RequireAccessToken(issuer, gtinLookup))
+			// El upload de fotos: multipart, 200 con la URL pública del objeto y NINGÚN byte
+			// en la base (docs/BACKEND.md §10.3).
+			mux.Handle("POST /photos", identity.RequireAccessToken(issuer, photosHandler))
 		})),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
