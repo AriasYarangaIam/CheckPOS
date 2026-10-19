@@ -3,8 +3,9 @@ import 'fake-indexeddb/auto'
 
 import Dexie from 'dexie'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { syncCatalogFromApi } from '@/catalog/catalogCache'
 import { POS_DATABASE_NAME, PosDatabase, type ProductRow } from '@/db/posDatabase'
 import { ProductCatalogScreen } from '@/screens/ProductCatalogScreen'
 
@@ -200,6 +201,77 @@ describe('ProductCatalogScreen', () => {
     expect(screen.getByRole('list').className).not.toMatch(/animate/)
 
     database.close()
+  })
+
+  it('renders the grid from the cached subset after syncing, without touching the network', async () => {
+    const database = freshDatabase()
+
+    /*
+     * El sync de W3-FE-3 sube el subconjunto del tenant a la base local, tal
+     * como `GET /products` lo sirve (contrato verbatim, stock NUMERIC). El
+     * `fetch` global queda espiado durante el render: si la grilla pidiera el
+     * catálogo otra vez, el conteo dejaría de ser cero.
+     */
+    const originalFetch = globalThis.fetch
+    const fetchSpy = vi.fn()
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: fetchSpy })
+
+    try {
+      await syncCatalogFromApi({
+        token: 'token-de-la-sesion',
+        database,
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 'a1-uuid',
+                  name: 'Arroz Costeño 1kg',
+                  gtin: '7591234567890',
+                  price_cents: 350,
+                  uom: 'unit',
+                  stock: '24',
+                  photo_url: null,
+                  attributes: { category: 'abarrotes' },
+                },
+                {
+                  id: 'a2-uuid',
+                  name: 'Pan francés',
+                  gtin: null,
+                  price_cents: 30,
+                  uom: 'unit',
+                  stock: '40',
+                  photo_url: null,
+                  attributes: { category: 'panadería' },
+                },
+              ],
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ) as unknown as Response,
+      })
+
+      expect(await database.products.count()).toBe(2)
+
+      render(<ProductCatalogScreen database={database} />)
+
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(2))
+
+      // La pantalla no conoce red: su fuente es la tabla local. Y el catálogo
+      // que contiene el dispositivo es solo el del tenant: las dos filas del
+      // subconjunto, ninguna más — ni global, ni de otro scope.
+      expect(screen.getByText('Arroz Costeño 1kg')).toBeTruthy()
+      expect(screen.getByText('Pan francés')).toBeTruthy()
+      expect(screen.getAllByTestId('category-chip').map((chip) => chip.textContent)).toEqual([
+        'Todas',
+        'abarrotes',
+        'panadería',
+      ])
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(globalThis, 'fetch', { configurable: true, value: originalFetch })
+
+      database.close()
+    }
   })
 
   it('adds the correct cart line when a tile is tapped', async () => {
