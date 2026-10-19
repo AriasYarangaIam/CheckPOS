@@ -20,6 +20,7 @@
 //	POST /products          —la digitalización del catálogo vive en `products`, con uom
 //	PATCH /products/{id}     columna tipada, stock inmutable por la superficie y LWW
 //	GET  /gtin-lookup       mediación read-only del catálogo global (Sprint 3, W3-BE-2)
+//	POST /sales             cierre de venta congelado y transaccional (Sprint 4, W4-BE-1)
 //	POST /photos            upload multipart: 200 con la URL del objeto, sin bytes en la
 //	                        base (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3)
 //
@@ -41,6 +42,7 @@ import (
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/catalog"
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
+	"github.com/AriasYarangaIam/CheckPOS/internal/ledger"
 	"github.com/AriasYarangaIam/CheckPOS/internal/photos"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/config"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
@@ -218,6 +220,15 @@ func run() error {
 		return err
 	}
 
+	// El cierre de venta (Sprint 4, W4-BE-1) corre sobre el MISMO pool de negocio: la
+	// venta apendiza `sales` + `sale_lines` + `stock_adjustments` dentro de una sola
+	// transacción de tenant (docs/BACKEND.md §4.9). El store es el único camino de datos
+	// de `sales`.
+	sales, err := ledger.NewSalesHandler(ledger.NewPostgresSaleStore(postgres.NewTenantPool(pool)), logger)
+	if err != nil {
+		return err
+	}
+
 	// El almacenamiento de objetos de las fotos (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3):
 	// el store local es la caja fuerte del contrato y el handler NO toca la base —la URL
 	// que devuelve es la única pieza que el cliente mandará después en photo_url.
@@ -247,6 +258,8 @@ func run() error {
 			// La mediación read-only del catálogo global: autenticada como el resto, y
 			// respondiendo a lo sumo UN producto por gtin (docs/DATABASE.md §5.6).
 			mux.Handle("GET /gtin-lookup", identity.RequireAccessToken(issuer, gtinLookup))
+			// El cierre de venta: tenant y usuario SOLO por los claims del token (§4.9).
+			mux.Handle("POST /sales", identity.RequireAccessToken(issuer, sales))
 			// El upload de fotos: multipart, 200 con la URL pública del objeto y NINGÚN byte
 			// en la base (docs/BACKEND.md §10.3).
 			mux.Handle("POST /photos", identity.RequireAccessToken(issuer, photosHandler))
