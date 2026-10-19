@@ -1,12 +1,15 @@
-// Pruebas unitarias de POST /sales (W4-BE-1): el contrato de la superficie HTTP sobre un
-// store stub, sin base de datos. El router es el real del proceso, en proceso (httptest,
-// igual que internal/identity/devicebind_test.go), porque la respuesta y el sobre de error
-// ÚNICO de §4.1 se deciden en el transporte.
+// Pruebas unitarias de POST /sales (W4-BE-1/W4-BE-2): el contrato de la superficie HTTP
+// sobre un store stub, sin base de datos. El router es el real del proceso, en proceso
+// (httptest, igual que internal/identity/devicebind_test.go), porque la respuesta y el
+// sobre de error ÚNICO de §4.1 se deciden en el transporte.
 //
 // Lo no negociable que se prueba acá: el tenant es SOLO el del token
 // (ARCHITECTURE.md:23), payment_method acepta exactamente los seis valores del CHECK
 // (docs/DATABASE.md §4 `sales`), y el store recibe los valores congelados TAL COMO
-// llegaron —el servidor no recomputa dinero (§2.3)—.
+// llegaron —el servidor no recomputa dinero (§2.3)—. El claim de idempotencia (W4-BE-2,
+// docs/DATABASE.md §7.1) es obligatorio en la superficie: la clave viaja del encabezado
+// al store con su hash, y las ramas A (repetición/payload distinto) y C (en vuelo) se
+// mapean a 200/422/409 en el transporte.
 package ledger_test
 
 import (
@@ -25,6 +28,7 @@ import (
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
 	"github.com/AriasYarangaIam/CheckPOS/internal/ledger"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
+	"github.com/AriasYarangaIam/CheckPOS/internal/synckey"
 )
 
 const (
@@ -41,6 +45,15 @@ const (
 	productAID = "019b0000-0000-7000-8000-0000000000a1"
 	// saleAID es el id de la venta que el cuerpo de referencia cierra.
 	saleAID = "019b0000-0000-7000-8000-0000000000c1"
+	// saleBID es el id de la venta del SEGUNDO cuerpo: la misma clave con un payload
+	// distinto (docs/DATABASE.md §7.1 Branch A).
+	saleBID = "019b0000-0000-7000-8000-0000000000c2"
+	// defaultIdempotencyKey es la clave que el helper de peticiones inyecta cuando la
+	// prueba no pide otra: el claim de W4-BE-2 es obligatorio en /sales.
+	defaultIdempotencyKey = "idem-key-0001"
+	// payloadMismatchCode es el código de superficie de Branch A con hashes distintos
+	// (docs/BACKEND.md §4.9 errores).
+	payloadMismatchCode = "idempotency.payload_mismatch"
 )
 
 // alwaysReady es el sondeo de preparación del router de estas pruebas.
@@ -62,10 +75,11 @@ type saleCloseCall struct {
 	userID     uuid.UUID
 	sale       ledger.SaleInput
 	receivedAt time.Time
+	claim      synckey.ClaimInput
 }
 
-func (s *stubSaleStore) CloseSale(_ context.Context, tenantID, userID uuid.UUID, sale ledger.SaleInput, receivedAt time.Time) ([]byte, error) {
-	s.calls = append(s.calls, saleCloseCall{tenantID: tenantID, userID: userID, sale: sale, receivedAt: receivedAt})
+func (s *stubSaleStore) CloseSale(_ context.Context, tenantID, userID uuid.UUID, sale ledger.SaleInput, receivedAt time.Time, claim synckey.ClaimInput) ([]byte, error) {
+	s.calls = append(s.calls, saleCloseCall{tenantID: tenantID, userID: userID, sale: sale, receivedAt: receivedAt, claim: claim})
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -128,7 +142,9 @@ func saleToken(t *testing.T, issuer *identity.TokenIssuer) string {
 }
 
 // doSaleRequest envía una petición al router con el método y el cuerpo pedidos. Un token
-// vacío omite la cabecera de credencial.
+// vacío omite la cabecera de credencial. El claim de W4-BE-2 es OBLIGATORIO en /sales,
+// así que el helper inyecta la clave de referencia —SALVO que la prueba pase una entrada
+// Idempotency-Key propia, vacía o no—: mostrar la clave es parte de lo que se prueba.
 func doSaleRequest(t *testing.T, router http.Handler, method, target, token, body string, extraHeaders map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -141,8 +157,12 @@ func doSaleRequest(t *testing.T, router http.Handler, method, target, token, bod
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
+	_, keyProvided := extraHeaders["Idempotency-Key"]
 	for name, value := range extraHeaders {
 		request.Header.Set(name, value)
+	}
+	if !keyProvided {
+		request.Header.Set("Idempotency-Key", defaultIdempotencyKey)
 	}
 
 	recorder := httptest.NewRecorder()
@@ -338,4 +358,117 @@ func TestSaleCloseFailurePaths(t *testing.T) {
 			t.Errorf("la causa quedó registrada SIN el payload (§7.9): %q", logs.String())
 		}
 	})
+}
+
+// TestSaleCloseCarriesTheClaimToTheStore: la clave del encabezado y el hash del payload
+// RAW (los mismos bytes que entraron, docs/BACKEND.md §6.2) viajan al store — el claim
+// vive en la transacción del cierre, no en el handler (docs/DATABASE.md §7.1).
+func TestSaleCloseCarriesTheClaimToTheStore(t *testing.T) {
+	key := "idem-key-integracion"
+	sales := &stubSaleStore{ack: []byte(`{}`)}
+	router, issuer := newSaleRouter(t, sales, &strings.Builder{})
+
+	body := validSaleBody()
+	recorder := doSaleRequest(t, router, http.MethodPost, "/sales", saleToken(t, issuer), body,
+		map[string]string{"Idempotency-Key": key})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("estado = %d, want 200 (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+
+	if len(sales.calls) != 1 {
+		t.Fatalf("el store corrió %d vez/veces, want 1", len(sales.calls))
+	}
+	claim := sales.calls[0].claim
+	if claim.Key != key {
+		t.Errorf("claim.Key = %q, want %q del encabezado", claim.Key, key)
+	}
+	if claim.PayloadHash != synckey.PayloadHash(key, []byte(body)) {
+		t.Errorf("claim.PayloadHash = %q, want el hash del cuerpo RAW (§6.2)", claim.PayloadHash)
+	}
+}
+
+// TestSaleCloseNeedsTheIdempotencyKey: sin encabezado no hay claim en el que caer la
+// venta — la petición es inservible ANTES del store (docs/BACKEND.md §4.9 idempotencia
+// requerida).
+func TestSaleCloseNeedsTheIdempotencyKey(t *testing.T) {
+	sales := &stubSaleStore{}
+	router, issuer := newSaleRouter(t, sales, &strings.Builder{})
+
+	// Una entrada explícita y VACÍA le dice al helper que la clave NO va: es la única
+	// forma de probar esa forma del cuerpo sin la inyección del default.
+	recorder := doSaleRequest(t, router, http.MethodPost, "/sales", saleToken(t, issuer), validSaleBody(),
+		map[string]string{"Idempotency-Key": "", "X-Test-Nonce": "sin-cabecera-de-claim"})
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("estado = %d, want 422 (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	envelope := decodeErrorEnvelope(t, recorder)
+	if envelope.Error.Code != httpx.CodeValidationError {
+		t.Errorf("error.code = %q, want %q", envelope.Error.Code, httpx.CodeValidationError)
+	}
+	if envelope.Error.Details["field"] != "Idempotency-Key" {
+		t.Errorf("details = %v, want el campo Idempotency-Key", envelope.Error.Details)
+	}
+	if len(sales.calls) != 0 {
+		t.Errorf("el store corrió %d vez/veces sin clave, want 0", len(sales.calls))
+	}
+}
+
+// TestSaleCloseMapsTheReplayBranch: una repetición verdadera (Branch A, hashes iguales) es
+// el snapshot ALMACENADO tal cual, HTTP 200, sin segunda escritura — el cuerpo que llegó
+// de vuelta es el que el claim guardó (docs/DATABASE.md §7.1, ARCHITECTURE.md:106).
+func TestSaleCloseMapsTheReplayBranch(t *testing.T) {
+	stored := []byte(`{"sale":{"sale_id":"019b"},"products":[]}`)
+	sales := &stubSaleStore{ack: stored}
+	router, issuer := newSaleRouter(t, sales, &strings.Builder{})
+
+	recorder := doSaleRequest(t, router, http.MethodPost, "/sales", saleToken(t, issuer), validSaleBody(), nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("estado = %d, want 200 (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	// El transporte añade el newline final a cualquier respuesta JSON: lo que se exige es
+	// que el cuerpo SEA el snapshot almacenado, byte a byte hasta el último salvo ese
+	// carácter de transporte.
+	if strings.TrimSuffix(recorder.Body.String(), "\n") != string(stored) {
+		t.Errorf("cuerpo = %q, want el snapshot ALMACENADO tal cual (raw, sin re-marshalling)", recorder.Body.String())
+	}
+}
+
+// TestSaleCloseMapsThePayloadMismatchBranch: la misma clave con otro cuerpo es el 422 del
+// contrato con el código idempotency.payload_mismatch y una segunda escritura NUNCA
+// (docs/DATABASE.md §7.1 Branch A, docs/BACKEND.md §4.9 errores).
+func TestSaleCloseMapsThePayloadMismatchBranch(t *testing.T) {
+	sales := &stubSaleStore{err: synckey.ErrPayloadMismatch}
+	router, issuer := newSaleRouter(t, sales, &strings.Builder{})
+
+	recorder := doSaleRequest(t, router, http.MethodPost, "/sales", saleToken(t, issuer), validSaleBody(), nil)
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("estado = %d, want 422 (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	envelope := decodeErrorEnvelope(t, recorder)
+	if envelope.Error.Code != payloadMismatchCode {
+		t.Errorf("error.code = %q, want %q", envelope.Error.Code, payloadMismatchCode)
+	}
+	if envelope.Error.Details["field"] != "Idempotency-Key" {
+		t.Errorf("details = %v, want el campo Idempotency-Key", envelope.Error.Details)
+	}
+}
+
+// TestSaleCloseMapsTheInFlightBranch: un duplicado concurrente (Branch C) es el 409 del
+// contrato, con Retry-After para el backoff del cliente, y la petición perdedora NO abre
+// una segunda venta (docs/BACKEND.md §6.3; ARCHITECTURE.md:107).
+func TestSaleCloseMapsTheInFlightBranch(t *testing.T) {
+	sales := &stubSaleStore{err: synckey.ErrInFlight}
+	router, issuer := newSaleRouter(t, sales, &strings.Builder{})
+
+	recorder := doSaleRequest(t, router, http.MethodPost, "/sales", saleToken(t, issuer), validSaleBody(), nil)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("estado = %d, want 409 (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	envelope := decodeErrorEnvelope(t, recorder)
+	if envelope.Error.Code != httpx.CodeConflict {
+		t.Errorf("error.code = %q, want %q", envelope.Error.Code, httpx.CodeConflict)
+	}
+	if recorder.Header().Get("Retry-After") == "" {
+		t.Errorf("sin Retry-After: el cliente no tiene backoff que respetar (Branch C)")
+	}
 }

@@ -186,6 +186,34 @@ func seedSaleUser(t *testing.T, db *testDatabase, tenantID, userID string) {
 	}
 }
 
+// seedClaim siembra UNA fila de `idempotency_keys` como DUEÑO, con el estado pedido. Es
+// siembra de estados que dos clientes concurrentes solo producirían viviendo el protocolo
+// (una fila en vuelo de una transacción ganadora o de un Claim aún abierto).
+func seedClaim(t *testing.T, db *testDatabase, tenantID, key string) {
+	t.Helper()
+
+	tx, err := db.owner.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("abrir la transacción de siembra del claim: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("generar el id del claim sembrado: %v", err)
+	}
+	if _, err := tx.ExecContext(context.Background(), `
+		INSERT INTO idempotency_keys (id, tenant_id, key, payload_hash, state, created_at)
+		VALUES ($1, $2, $3, 'seeded-payload-hash', 'in_flight', now())`,
+		id, tenantID, key); err != nil {
+		t.Fatalf("sembrar el claim %s: %v", key, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("confirmar la siembra del claim: %v", err)
+	}
+}
+
 // saleQueryCount corre una consulta de conteo por pos_app dentro del contexto del tenant.
 func saleQueryCount(t *testing.T, tenants *postgres.TenantPool, tenantID, query string, args ...any) int {
 	t.Helper()

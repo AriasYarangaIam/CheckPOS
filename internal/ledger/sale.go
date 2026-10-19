@@ -12,6 +12,7 @@ import (
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/catalog"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/postgres"
+	"github.com/AriasYarangaIam/CheckPOS/internal/synckey"
 )
 
 // El cierre de venta (docs/BACKEND.md §4.9): un solo INSERT transaccional en `sales` +
@@ -65,11 +66,11 @@ type SaleInput struct {
 // internal/catalog/product.go): una interfaz, para que el handler se pruebe sin base.
 //
 // Devuelve el cuerpo JSON EXACTO del acuse de §4.9: la venta cerrada y los niveles de
-// stock refrescados que el cliente vuelve a renderizar (ARCHITECTURE.md:100). El []byte es
-// la pieza que el claim de idempotencia (W4-BE-2) va a reenviar byte a byte en la
+// stock refrescados que el cliente vuelve a renderizar (ARCHITECTURE.md:100). El []byte
+// es la pieza que el claim de idempotencia (W4-BE-2) va a reenviar byte a byte en la
 // repetición (docs/DATABASE.md §7.1 Branch A).
 type SaleStore interface {
-	CloseSale(ctx context.Context, tenantID, userID uuid.UUID, sale SaleInput, receivedAt time.Time) ([]byte, error)
+	CloseSale(ctx context.Context, tenantID, userID uuid.UUID, sale SaleInput, receivedAt time.Time, claim synckey.ClaimInput) ([]byte, error)
 }
 
 // saleAckLine es una línea del acuse de §4.9, con los valores congelados que la fila
@@ -145,13 +146,14 @@ func NewPostgresSaleStore(tenants *postgres.TenantPool) *PostgresSaleStore {
 }
 
 // CloseSale cierra la venta: UNA TRANSACCIÓN. El orden interno es el que el §4.9 exige —
+// reclamar la clave de idempotencia con el INSERT sobre la UNIQUE (Branch B del §7.1),
 // validar el producto contra el catálogo por RLS, apendizar el encabezado y sus líneas
-// congeladas, escribir el delta de stock por línea y proyectar el stock aditivo— antes de
-// armar el acuse con los niveles refrescados. Cualquier paso que falla revierte TODO:
-// el claim de idempotencia que W4-BE-2 acopla a este cierre comparte la misma
-// transacción, así que claim y venta nacen o mueren juntos (MD-4).
-func (s *PostgresSaleStore) CloseSale(ctx context.Context, tenantID, userID uuid.UUID, sale SaleInput, receivedAt time.Time) ([]byte, error) {
-	if err := guardSaleInputs(tenantID, userID, sale, receivedAt); err != nil {
+// congeladas, escribir el delta de stock por línea, proyectar el stock aditivo y completar
+// el claim con su snapshot— antes de armar el acuse con los niveles refrescados.
+// Cualquier paso que falla revierte TODO, incluido el claim: la transacción es
+// todo-o-nada, así que claim y venta nacen o mueren juntos (MD-4).
+func (s *PostgresSaleStore) CloseSale(ctx context.Context, tenantID, userID uuid.UUID, sale SaleInput, receivedAt time.Time, claim synckey.ClaimInput) ([]byte, error) {
+	if err := guardSaleInputs(tenantID, userID, sale, receivedAt, claim); err != nil {
 		return nil, err
 	}
 
@@ -162,6 +164,21 @@ func (s *PostgresSaleStore) CloseSale(ctx context.Context, tenantID, userID uuid
 
 	var ack []byte
 	err := s.tenants.WithTenant(ctx, tenantID, func(ctx context.Context, tx postgres.TenantTx) error {
+		// Branch B ANTES de la escritura: la fila de `idempotency_keys` ES el claim y se
+		// gana INSERTANDO sobre la UNIQUE (tenant_id, key) — jamás SELECT-then-INSERT
+		// (§7.1). El re-read de las ramas A/C corre por el savepoint que el propio Claim
+		// abre. Sin claim, esta transacción tampoco corre escritura de negocio.
+		claimed, err := synckey.Claim(ctx, tx, tenantID, claim.Key, claim.PayloadHash, receivedAt)
+		if err != nil {
+			return err
+		}
+		if claimed.Replay != nil {
+			// Branch A, repetición verdadera: la respuesta es el snapshot ALMACENADO tal
+			// cual, sin correr NINGÚN camino de negocio (§7.1).
+			ack = claimed.Replay
+			return nil
+		}
+
 		// El producto tiene que ser visible por RLS: la FK de `sale_lines` corre FUERA del
 		// alcance del RLS — aprobaría la fila de otro tenant como aprueba la propia. Esta
 		// lectura es la barrera de aislamiento REAL de la referencia por cuerpo (§4.1).
@@ -210,11 +227,17 @@ func (s *PostgresSaleStore) CloseSale(ctx context.Context, tenantID, userID uuid
 			return err
 		}
 
-		body, err := saleAcknowledgeJSON(tenantID, userID, sale, receivedAt, stocks)
+		// Complete es el ÚLTIMO paso de la transacción (§7.1 Branch B): el snapshot viaja
+		// con el estado 'completed' y el COMMIT los consolida juntos — un crash antes
+		// lo revierte todo: claim, venta y stock.
+		stocksBody, err := saleAcknowledgeJSON(tenantID, userID, sale, receivedAt, stocks)
 		if err != nil {
 			return err
 		}
-		ack = body
+		if err := synckey.Complete(ctx, tx, claimed.ID, stocksBody); err != nil {
+			return err
+		}
+		ack = stocksBody
 		return nil
 	})
 	if err != nil {
@@ -225,8 +248,9 @@ func (s *PostgresSaleStore) CloseSale(ctx context.Context, tenantID, userID uuid
 
 // guardSaleInputs valida las precondiciones de escritura ANTES de abrir la primera
 // transacción: son defectos de programación del llamador, no peticiones erróneas (patrón
-// de catalog.guardWrite). El handler ya validó el cuerpo; esto cierra el tipo.
-func guardSaleInputs(tenantID, userID uuid.UUID, sale SaleInput, receivedAt time.Time) error {
+// de catalog.guardWrite). El handler ya validó el cuerpo y el encabezado del claim; esto
+// cierra el tipo.
+func guardSaleInputs(tenantID, userID uuid.UUID, sale SaleInput, receivedAt time.Time, claim synckey.ClaimInput) error {
 	switch {
 	case tenantID == uuid.Nil:
 		return errors.New("the sale store needs the tenant id of the token")
@@ -240,6 +264,10 @@ func guardSaleInputs(tenantID, userID uuid.UUID, sale SaleInput, receivedAt time
 		return errors.New("the sale needs at least one line")
 	case receivedAt.IsZero():
 		return errors.New("the sale close needs the server close time")
+	case claim.Key == "":
+		return errors.New("the sale close needs the idempotency key of the client")
+	case claim.PayloadHash == "":
+		return errors.New("the sale close needs the payload hash of the claim")
 	}
 	return nil
 }

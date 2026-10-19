@@ -1,8 +1,10 @@
 package ledger
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
+	"github.com/AriasYarangaIam/CheckPOS/internal/synckey"
 )
 
 // El handler de POST /sales (docs/BACKEND.md §4.9): anclado a `sales` + `sale_lines` de
@@ -44,6 +47,12 @@ const dayFormat = "2006-01-02"
 // errNoSaleClaims es el 500 fail-closed: sin middleware no hay token, y sin token no hay
 // ni tenant ni usuario de los que cerrar una venta (igual que internal/catalog).
 var errNoSaleClaims = errors.New("the sales handler needs the token claims")
+
+// payloadMismatchCode es el código de superficie de Branch A con hashes distintos: la
+// misma clave usada para otro payload (docs/DATABASE.md §7.1, docs/BACKEND.md §4.9). No
+// es un 422 de validación del cuerpo — son apenas un encabezado y un reclamo que chocan —
+// y el código propio le marca la diferencia al cliente.
+const payloadMismatchCode = "idempotency.payload_mismatch"
 
 // SalesHandler atiende POST /sales sobre un store.
 type SalesHandler struct {
@@ -102,11 +111,31 @@ type saleRequest struct {
 	Lines         []saleLineRequest `json:"lines"`
 }
 
-// close atiende el POST completo: decode del cuerpo, validación §4.9, y la llamada del
-// store, que es LA transacción.
+// close atiende el POST completo: la clave de claim, el cuerpo RAW (el hash de §6.2 va
+// sobre los mismos bytes que llegaron), la validación §4.9 y la llamada del store, que es
+// LA transacción con el claim dentro. Las ramas del protocolo (docs/DATABASE.md §7.1)
+// se resuelven así en la superficie: repetición y cierre fresco devuelven 200 con el
+// snapshot, la clave reutilizada con otro payload es el 422 de payload_mismatch, y el
+// duplicado en vuelo es el 409 con Retry-After del Branch C.
 func (h *SalesHandler) close(w http.ResponseWriter, r *http.Request, claims identity.Claims) {
+	// El claim es OBLIGATORIO (docs/BACKEND.md §4.9): sin encabezado la petición es
+	// inservible y el store ni corre.
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" {
+		httpx.WriteError(w, validation("the sale close requires the Idempotency-Key header", "Idempotency-Key"))
+		return
+	}
+
+	// El hash del claim corre sobre el cuerpo RAW: los mismos bytes que el cliente envió,
+	// no una re-serialización del struct (docs/BACKEND.md §6.2).
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpx.WriteError(w, httpx.Validation("the body must be a JSON object with the sale fields of §4.9", nil))
+		return
+	}
+
 	var request saleRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&request); err != nil {
 		httpx.WriteError(w, httpx.Validation("the body must be a JSON object with the sale fields of §4.9", nil))
 		return
 	}
@@ -118,9 +147,30 @@ func (h *SalesHandler) close(w http.ResponseWriter, r *http.Request, claims iden
 	}
 
 	// Una sola lectura del reloj: marca el cierre que created_at y received_at comparten
-	// en `sales`, y que el delta de stock comparte en `stock_adjustments`.
-	ack, err := h.sales.CloseSale(r.Context(), claims.TenantID, claims.UserID, sale, time.Now())
+	// en `sales`, que el delta de stock comparte en `stock_adjustments`, y que la fila del
+	// claim comparte en `idempotency_keys`.
+	ack, err := h.sales.CloseSale(r.Context(), claims.TenantID, claims.UserID, sale, time.Now(), synckey.ClaimInput{
+		Key:         key,
+		PayloadHash: synckey.PayloadHash(key, raw),
+	})
 	switch {
+	case errors.Is(err, synckey.ErrPayloadMismatch):
+		// Branch A con hashes distintos: la misma clave hablar por otro payload es el 422
+		// del §4.9 con su código propio. Nadie escribió nada detrás del conflicto.
+		httpx.WriteError(w, &httpx.Error{
+			Status:  http.StatusUnprocessableEntity,
+			Code:    payloadMismatchCode,
+			Message: "the same idempotency key was already used with a different payload",
+			Details: map[string]string{"field": "Idempotency-Key"},
+		})
+		return
+	case errors.Is(err, synckey.ErrInFlight):
+		// Branch C: el ganador sigue en vuelo — el 409 del §6.3 con el Retry-After para el
+		// backoff del cliente. La cabecera va ANTES de WriteHeader: tiene que salir en la
+		// misma respuesta del conflicto.
+		w.Header().Set("Retry-After", "2")
+		httpx.WriteError(w, httpx.Conflict("the same idempotency key is still in flight: retry after backoff"))
+		return
 	case errors.Is(err, ErrUnknownProduct):
 		// La referencia por cuerpo al catálogo de otro tenant es inservible (422): se nombra
 		// el campo, JAMÁS el id ajeno ni la existencia de otro tenant (§4.1).
@@ -136,8 +186,8 @@ func (h *SalesHandler) close(w http.ResponseWriter, r *http.Request, claims iden
 		"sale_id", sale.ID.String(),
 		"tenant_id", claims.TenantID.String(),
 	)
-	// El acuse es el cuerpo EXACTO que armó el store: la forma que la repetición
-	// idempotente (W4-BE-2) reenviará sin volver a cerrar nada.
+	// El acuse es el cuerpo EXACTO que armó el store: en Branch B es el acuse fresco y en
+	// Branch A es el snapshot almacenado — los dos llegan byte a byte de la base.
 	httpx.WriteJSON(w, http.StatusOK, json.RawMessage(ack))
 }
 

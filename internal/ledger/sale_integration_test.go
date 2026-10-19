@@ -15,9 +15,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
 	"github.com/AriasYarangaIam/CheckPOS/internal/ledger"
@@ -295,4 +298,204 @@ func newLedgerIntegrationRouter(t *testing.T, tenants *postgres.TenantPool, logB
 			mux.Handle("POST /sales", identity.RequireAccessToken(issuer, handler))
 		}),
 	), issuer
+}
+
+// withSaleKey envía el cuerpo de referencia con una clave de claim concreta.
+func withSaleKey(t *testing.T, router http.Handler, issuer *identity.TokenIssuer, key, body string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	return doSaleRequest(t, router, http.MethodPost, "/sales", saleToken(t, issuer), body,
+		map[string]string{"Idempotency-Key": key})
+}
+
+// TestSaleCloseReplaysTheStoredSnapshotWithoutASecondWrite: Branch A del §7.1 contra la
+// base real — la MISMA clave con el MISMO cuerpo devuelve el snapshot ALMACENADO byte a
+// byte, y la repetición no deja NI una segunda venta NI un segundo delta de stock
+// (ARCHITECTURE.md:106).
+func TestSaleCloseReplaysTheStoredSnapshotWithoutASecondWrite(t *testing.T) {
+	db := newThrowawayDatabase(t)
+	seedTenant(t, db, tokenTenantID)
+	seedSaleUser(t, db, tokenTenantID, tokenUserID)
+	tenants := postgres.NewTenantPool(db.rolePool(t, config.AppDatabaseURL(), "pos_app"))
+	router, issuer := newLedgerIntegrationRouter(t, tenants, &strings.Builder{})
+	seedProduct(t, db, saleProduct{id: productAID, tenantID: tokenTenantID, stock: "6.500"})
+
+	key := "sale-replay-0001"
+	first := withSaleKey(t, router, issuer, key, validSaleBody())
+	if first.Code != http.StatusOK {
+		t.Fatalf("estado del primer cierre = %d, want 200 (cuerpo %q)", first.Code, first.Body.String())
+	}
+
+	replay := withSaleKey(t, router, issuer, key, validSaleBody())
+	if replay.Code != http.StatusOK {
+		t.Fatalf("estado de la repetición = %d, want 200 (cuerpo %q)", replay.Code, replay.Body.String())
+	}
+	if replay.Body.String() != first.Body.String() {
+		t.Errorf("cuerpo repetido = %q, want el snapshot ALMACENADO byte a byte %q", replay.Body.String(), first.Body.String())
+	}
+
+	// Ninguna escritura de negocio detrás del replay: UNA fila en `sales`, los dos deltas
+	// que el primer cierre escribió, y el stock proyectado intacto.
+	if got := saleQueryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM sales`); got != 1 {
+		t.Errorf("sales = %d fila(s), want 1: el replay no cierra una segunda venta", got)
+	}
+	if got := saleQueryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM stock_adjustments`); got != 2 {
+		t.Errorf("stock_adjustments = %d fila(s), want 2: el replay no mueve stock otra vez", got)
+	}
+	stockAfterReplay, _ := readProductStock(t, tenants, tokenTenantID, productAID)
+	if stockAfterReplay != "2.750" {
+		t.Errorf("stock tras el replay = %q, want 2.750 intacto", stockAfterReplay)
+	}
+
+	// Y la fila del claim quedó completada con el snapshot guardado.
+	withTenant(t, tenants, tokenTenantID, func(tx postgres.TenantTx) {
+		var (
+			rows     int
+			complets int
+		)
+		if err := tx.QueryRow(context.Background(), `SELECT count(*), count(*) FILTER (WHERE state = 'completed') FROM idempotency_keys WHERE key = $1`, key).
+			Scan(&rows, &complets); err != nil {
+			t.Fatalf("leer el claim: %v", err)
+		}
+		if rows != 1 || complets != 1 {
+			t.Errorf("claims = (%d, %d completados), want exactamente una fila y completada", rows, complets)
+		}
+		var snapshot string
+		if err := tx.QueryRow(context.Background(), `SELECT response_snapshot FROM idempotency_keys WHERE key = $1`, key).
+			Scan(&snapshot); err != nil {
+			t.Fatalf("leer el snapshot del claim: %v", err)
+		}
+		// El snapshot almacenado es el acuse del store; la respuesta HTTP lleva además el
+		// newline de transporte del encoder. Los cuerpos son los mismos bytes.
+		if snapshot != strings.TrimSuffix(first.Body.String(), "\n") {
+			t.Errorf("snapshot almacenado = %q, want el acuse EXACTO del primer cierre", snapshot)
+		}
+	})
+}
+
+// TestSaleCloseRejectsTheSameKeyWithADifferentBody: la MISMA clave con otro cuerpo es el
+// 422 de Branch A con el código idempotency.payload_mismatch, y no deja una segunda venta
+// (docs/DATABASE.md §7.1; ARCHITECTURE.md:106).
+func TestSaleCloseRejectsTheSameKeyWithADifferentBody(t *testing.T) {
+	db := newThrowawayDatabase(t)
+	seedTenant(t, db, tokenTenantID)
+	seedSaleUser(t, db, tokenTenantID, tokenUserID)
+	tenants := postgres.NewTenantPool(db.rolePool(t, config.AppDatabaseURL(), "pos_app"))
+	router, issuer := newLedgerIntegrationRouter(t, tenants, &strings.Builder{})
+	seedProduct(t, db, saleProduct{id: productAID, tenantID: tokenTenantID, stock: "6.500"})
+
+	key := "sale-mismatch-0002"
+	if first := withSaleKey(t, router, issuer, key, validSaleBody()); first.Code != http.StatusOK {
+		t.Fatalf("estado del primer cierre = %d, want 200 (cuerpo %q)", first.Code, first.Body.String())
+	}
+
+	// Otro cuerpo PERFECTO: venta distinta, línea única — pero la clave ya habló por otro
+	// payload, y el claim es por (tenant_id, key) sin segunda oportunidad.
+	otherBody := `{"sale_id":"` + saleBID + `","sold_on":"2026-10-19","payment_method":"cash","total_cents":1550,
+		"lines":[{"line_no":1,"product_id":"` + productAID + `","name":"arroz especial 1kg","price_cents":1550,"uom":"kg","qty":"1.000","line_total_cents":1550}]}`
+	second := withSaleKey(t, router, issuer, key, otherBody)
+	if second.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("estado de la repetición con otro cuerpo = %d, want 422 (cuerpo %q)", second.Code, second.Body.String())
+	}
+	envelope := decodeErrorEnvelope(t, second)
+	if envelope.Error.Code != payloadMismatchCode {
+		t.Errorf("error.code = %q, want %q", envelope.Error.Code, payloadMismatchCode)
+	}
+	if got := saleQueryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM sales`); got != 1 {
+		t.Errorf("sales = %d fila(s), want 1: el conflicto de payload no abre una segunda venta", got)
+	}
+}
+
+// TestSaleCloseReports409WhenTheClaimIsStillInFlight: la clave está reclamada por una
+// operación todavía sin snapshot — la respuesta perdedora es el 409 del §6.3 con
+// Retry-After, y NADA se escribe: ni un claim duplicado, ni una venta (Branch C;
+// ARCHITECTURE.md:107).
+func TestSaleCloseReports409WhenTheClaimIsStillInFlight(t *testing.T) {
+	db := newThrowawayDatabase(t)
+	seedTenant(t, db, tokenTenantID)
+	seedSaleUser(t, db, tokenTenantID, tokenUserID)
+	tenants := postgres.NewTenantPool(db.rolePool(t, config.AppDatabaseURL(), "pos_app"))
+	router, issuer := newLedgerIntegrationRouter(t, tenants, &strings.Builder{})
+	seedProduct(t, db, saleProduct{id: productAID, tenantID: tokenTenantID, stock: "6.500"})
+
+	key := "sale-inflight-0003"
+	seedClaim(t, db, tokenTenantID, key)
+
+	recorder := withSaleKey(t, router, issuer, key, validSaleBody())
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("estado = %d, want 409 (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	envelope := decodeErrorEnvelope(t, recorder)
+	if envelope.Error.Code != httpx.CodeConflict {
+		t.Errorf("error.code = %q, want %q", envelope.Error.Code, httpx.CodeConflict)
+	}
+	if got := recorder.Header().Get("Retry-After"); got == "" {
+		t.Errorf("sin Retry-After: el cliente no tiene backoff que respetar (Branch C)")
+	}
+	if got := saleQueryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM sales`); got != 0 {
+		t.Errorf("sales = %d fila(s), want 0: el duplicado en vuelo no abre una segunda venta", got)
+	}
+	if got := saleQueryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM idempotency_keys`); got != 1 {
+		t.Errorf("idempotency_keys = %d fila(s), want 1: el claim no se duplica", got)
+	}
+}
+
+// TestSaleCloseReports409WhileTheWinnerHoldsTheUniqueIndex: Branch C REAL — una transacción
+// ganadora VIVA dentro de su ventana de commit retiene la entrada del índice único, el
+// INSERT perdedor espera detrás del lock timeout del §7.1 y responde 409 + Retry-After;
+// liberada la ganadora, el reintento del cliente aterriza en la rama B y cierra UNA venta
+// (docs/BACKEND.md §6.1 paso 5).
+func TestSaleCloseReports409WhileTheWinnerHoldsTheUniqueIndex(t *testing.T) {
+	db := newThrowawayDatabase(t)
+	seedTenant(t, db, tokenTenantID)
+	seedSaleUser(t, db, tokenTenantID, tokenUserID)
+	tenants := postgres.NewTenantPool(db.rolePool(t, config.AppDatabaseURL(), "pos_app"))
+	router, issuer := newLedgerIntegrationRouter(t, tenants, &strings.Builder{})
+	seedProduct(t, db, saleProduct{id: productAID, tenantID: tokenTenantID, stock: "6.500"})
+
+	key := "sale-race-0004"
+
+	// El ganador: un claim en vuelo SIN confirmar, sostenido por su transacción como
+	// cualquier `POST /sales` en curso. La fila es de siembra y vive mientras viva la tx.
+	holder, err := db.owner.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("abrir la transacción del ganador: %v", err)
+	}
+	defer func() { _ = holder.Rollback() }()
+
+	claimID, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("generar el id del claim del ganador: %v", err)
+	}
+	if _, err := holder.ExecContext(context.Background(), `
+		INSERT INTO idempotency_keys (id, tenant_id, key, payload_hash, state, created_at)
+		VALUES ($1, $2, $3, 'winner-payload-hash', 'in_flight', now())`,
+		claimID, tokenTenantID, key); err != nil {
+		t.Fatalf("reclamar con la transacción ganadora: %v", err)
+	}
+
+	loser := withSaleKey(t, router, issuer, key, validSaleBody())
+	if loser.Code != http.StatusConflict {
+		t.Fatalf("estado del perdedor = %d, want 409 (cuerpo %q)", loser.Code, loser.Body.String())
+	}
+	if got := loser.Header().Get("Retry-After"); got == "" {
+		t.Errorf("sin Retry-After: el perdedor no tiene backoff que respetar (Branch C)")
+	}
+
+	// La ganadora se va SIN confirmar (el rollback del crash, no el commit): la clave
+	// queda disponible de nuevo, y el reintento del cliente aterriza en la rama B y cierra
+	// UNA sola venta.
+	if err := holder.Rollback(); err != nil {
+		t.Fatalf("soltar el claim del ganador: %v", err)
+	}
+	if got := saleQueryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM sales`); got != 0 {
+		t.Errorf("sales tras el perdedor = %d fila(s), want 0", got)
+	}
+	retry := withSaleKey(t, router, issuer, key, validSaleBody())
+	if retry.Code != http.StatusOK {
+		t.Fatalf("estado del reintento = %d, want 200 (cuerpo %q)", retry.Code, retry.Body.String())
+	}
+	if got := saleQueryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM sales`); got != 1 {
+		t.Errorf("sales tras el reintento = %d fila(s), want 1: tenía que cerrar UNA sola venta", got)
+	}
 }
