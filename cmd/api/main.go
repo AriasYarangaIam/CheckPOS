@@ -16,6 +16,12 @@
 //	POST /auth/login   ruta pre-auth: 200 con el access token de empleado, 401 genérico
 //	POST /auth/device-bind  ruta autenticada: 200 con el dispositivo y su ventana offline,
 //	                        401 si el access token falta o no verifica
+//	GET  /products          rutas autenticadas del catálogo por tenant (Sprint 3, W3-BE-1)
+//	POST /products          —la digitalización del catálogo vive en `products`, con uom
+//	PATCH /products/{id}     columna tipada, stock inmutable por la superficie y LWW
+//	GET  /gtin-lookup       mediación read-only del catálogo global (Sprint 3, W3-BE-2)
+//	POST /photos            upload multipart: 200 con la URL del objeto, sin bytes en la
+//	                        base (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3)
 //
 // SIGINT y SIGTERM disparan un apagado ordenado: el servidor deja de aceptar conexiones
 // y espera las peticiones en vuelo antes de cerrar los pools.
@@ -33,7 +39,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/AriasYarangaIam/CheckPOS/internal/catalog"
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
+	"github.com/AriasYarangaIam/CheckPOS/internal/photos"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/config"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/logging"
@@ -143,6 +151,24 @@ func run() error {
 		return err
 	}
 
+	// El tercer pool (Sprint 3, W3-BE-2): `pos_platform` existe para UNA forma de consulta,
+	// la mediación read-only del catálogo global. Es un pool CRUDO a propósito —las tablas
+	// globales no tienen RLS de tenant y no reciben contexto que no existe (docs/DATABASE.md
+	// §5.6)—, y sus dos aserciones de arranque valen lo mismo que las de los otros dos DSN.
+	platformPool, err := postgres.New(ctx, cfg.PlatformDatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer platformPool.Close()
+
+	if err := postgres.AssertLeastPrivilegeRole(ctx, platformPool, "DATABASE_PLATFORM_URL"); err != nil {
+		return err
+	}
+
+	if err := postgres.AssertExpectedRole(ctx, platformPool, "DATABASE_PLATFORM_URL", "pos_platform"); err != nil {
+		return err
+	}
+
 	readiness := dependencies{app: pool, auth: authPool}
 
 	if err := readiness.Ping(ctx); err != nil {
@@ -177,6 +203,34 @@ func run() error {
 		return err
 	}
 
+	// El catálogo por tenant (Sprint 3, W3-BE-1) corre sobre el MISMO pool de negocio
+	// (pos_app + WithTenant). El store es el único camino de datos de `products`.
+	products, err := catalog.NewProductsHandler(catalog.NewPostgresProductStore(postgres.NewTenantPool(pool)), logger)
+	if err != nil {
+		return err
+	}
+
+	// La mediación del catálogo global (Sprint 3, W3-BE-2) corre sobre el pool de
+	// `pos_platform`, que es el ÚNICO rol con concesiones de lectura sobre las tablas
+	// globales: este handler es su único consumidor de producción (docs/DATABASE.md §5.6).
+	gtinLookup, err := catalog.NewGtinLookupHandler(catalog.NewPlatformGtinLookup(platformPool), logger)
+	if err != nil {
+		return err
+	}
+
+	// El almacenamiento de objetos de las fotos (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3):
+	// el store local es la caja fuerte del contrato y el handler NO toca la base —la URL
+	// que devuelve es la única pieza que el cliente mandará después en photo_url.
+	photoStore, err := photos.NewLocalStore(cfg.ObjectStorageDir, cfg.ObjectStorageURL)
+	if err != nil {
+		return err
+	}
+
+	photosHandler, err := photos.NewPhotosHandler(photoStore, logger)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpx.NewRouter(logger, readiness, httpx.WithRoutes(func(mux *http.ServeMux) {
@@ -185,6 +239,17 @@ func run() error {
 			// tenant: leerlo del cuerpo o de un encabezado no existe en el contrato
 			// (ARCHITECTURE.md:23).
 			mux.Handle("POST /auth/device-bind", identity.RequireAccessToken(issuer, deviceBind))
+			// El catálogo por tenant: las tres rutas de /products detrás del MISMO middleware,
+			// y el tenant y el usuario salen de los claims del token para las tres.
+			mux.Handle("GET /products", identity.RequireAccessToken(issuer, products))
+			mux.Handle("POST /products", identity.RequireAccessToken(issuer, products))
+			mux.Handle("PATCH /products/{id}", identity.RequireAccessToken(issuer, products))
+			// La mediación read-only del catálogo global: autenticada como el resto, y
+			// respondiendo a lo sumo UN producto por gtin (docs/DATABASE.md §5.6).
+			mux.Handle("GET /gtin-lookup", identity.RequireAccessToken(issuer, gtinLookup))
+			// El upload de fotos: multipart, 200 con la URL pública del objeto y NINGÚN byte
+			// en la base (docs/BACKEND.md §10.3).
+			mux.Handle("POST /photos", identity.RequireAccessToken(issuer, photosHandler))
 		})),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
