@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { CheckoutScreen } from '@/screens/CheckoutScreen'
 import { CartPanel } from '@/components/CartPanel'
+import { SaleTicket } from '@/components/SaleTicket'
 import { Button } from '@/components/ui/Button'
 import { cartTotalCents, emptyCart, payableCartLines } from '@/cart/cartStore'
 import { useCartLines } from '@/hooks/useCartLines'
@@ -10,7 +11,6 @@ import type { TenderMethod } from '@/sales/tenderMethods'
 import { getPosDatabase, type PosDatabase } from '@/db/posDatabase'
 import { formatCentsToSoles } from '@/lib/money'
 import { cn } from '@/lib/utils'
-import { TENDER_LABELS } from '@/sales/tenderMethods'
 import { addIdentifiedLine } from '@/cart/identifiedLine'
 import {
   ProductScanner,
@@ -44,26 +44,11 @@ export interface CounterSaleScreenProps {
   readonly getUserMedia?: typeof navigator.mediaDevices.getUserMedia
   /** Inyectable para las pruebas; en producción, el `BarcodeDetector` nativo. */
   readonly createBarcodeDetector?: BarcodeDetectorFactory
+  /** Inyectable para las pruebas; en producción, `navigator.share` del sheet. */
+  readonly share?: (data?: ShareData) => Promise<void>
 }
 
 type FlowView = 'sale' | 'checkout' | 'closed'
-
-/** Línea del resumen con el tender y el vuelto de la venta cerrada. */
-function methodLabelOf(
-  method: TenderMethod,
-  receivedCents: number,
-  totalCents: number,
-): string {
-  const label = TENDER_LABELS[method]
-
-  if (method === 'fiado') return `Fiado: el cargo queda en la cuenta del cliente.`
-
-  const change = receivedCents - totalCents
-
-  return change > 0
-    ? `${label}: recibido ${formatCentsToSoles(receivedCents)}, vuelto ${formatCentsToSoles(change)}.`
-    : `${label}: cobro exacto de ${formatCentsToSoles(receivedCents)}.`
-}
 
 /**
  * Aviso no modal por cada fallo de cámara (§251-252): la venta nunca queda
@@ -81,6 +66,7 @@ export function CounterSaleScreen({
   fetchImpl,
   getUserMedia,
   createBarcodeDetector,
+  share,
 }: CounterSaleScreenProps) {
   const [view, setView] = useState<FlowView>('sale')
   // §1.2:134 — Productos (grilla) es la vista por defecto; la cámara es el
@@ -92,6 +78,7 @@ export function CounterSaleScreen({
     readonly method: TenderMethod
     readonly receivedCents: number
     readonly totalCents: number
+    readonly saleId: string
   } | null>(null)
   const lines = useCartLines(database)
   const payable = payableCartLines(lines)
@@ -113,11 +100,14 @@ export function CounterSaleScreen({
     // carrito para que el cierre y el POST sean de la misma venta.
     const payload = buildSaleClosePayload(payable, { paymentMethod: method })
 
-    // Cierre local: es el hecho que el cajero ve, no el acuse remoto.
+    // Cierre local: es el hecho que el cajero ve, no el acuse remoto. El
+    // número de operación del ticket es el sale_id del payload congelado, el
+    // mismo que el servidor reclama — válido también sin conexión.
     setClosedSale({
       method,
       receivedCents,
       totalCents: payload.total_cents,
+      saleId: payload.sale_id,
     })
     setDelivery(token === undefined ? 'not-sent' : undefined)
     setView('closed')
@@ -152,30 +142,16 @@ export function CounterSaleScreen({
         <h2 className="text-heading-md font-bold" id="sale-closed-title">
           Venta cerrada
         </h2>
-        <div data-testid="sale-closed-summary" className="rounded-2xl border border-surface-border bg-surface-card p-4">
-          <span className="text-caption-xs uppercase text-text-secondary">Total</span>
-          <p className="font-mono tabular-nums text-display-lg text-text-primary">
-            {closedSale === null ? '' : formatCentsToSoles(closedSale.totalCents)}
-          </p>
-          <p className="text-body-sm text-text-secondary">
-            {closedSale === null
-              ? null
-              : methodLabelOf(closedSale.method, closedSale.receivedCents, closedSale.totalCents)}
-          </p>
-          <p className="text-body-sm text-text-secondary">
-            {delivery === undefined
-              ? 'El envío al servidor está en camino.'
-              : delivery === 'not-sent'
-                ? 'La venta cerró en este dispositivo; el envío queda pendiente hasta que la sesión en línea esté disponible.'
-                : delivery.status === 'acknowledged'
-                  ? 'El servidor confirmó la venta con acuse.'
-                  : delivery.status === 'mismatch'
-                    ? 'El servidor detectó esta clave con un cuerpo distinto. La venta siguió cerrada localmente.'
-                    : delivery.status === 'rejected'
-                      ? `El servidor rechazó el cuerpo (${delivery.error.code}). La venta siguió cerrada localmente.`
-                      : 'El envío no quedó confirmado (red o conflicto en vuelo). La venta siguió cerrada localmente.'}
-          </p>
-        </div>
+        {closedSale === null ? null : (
+          <SaleTicket
+            delivery={delivery}
+            method={closedSale.method}
+            operationNumber={closedSale.saleId}
+            receivedCents={closedSale.receivedCents}
+            share={share}
+            totalCents={closedSale.totalCents}
+          />
+        )}
         <Button onClick={() => setView('sale')}>Nueva venta</Button>
       </section>
     )

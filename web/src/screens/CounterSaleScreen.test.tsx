@@ -66,6 +66,12 @@ function asGetUserMedia(
   return stub as unknown as typeof navigator.mediaDevices.getUserMedia
 }
 
+function asShareInScreen(
+  stub: ReturnType<typeof vi.fn>,
+): (data?: ShareData) => Promise<void> {
+  return stub as unknown as (data?: ShareData) => Promise<void>
+}
+
 describe('CounterSaleScreen', () => {
   it('hosts the products grid and the cart on the same sale surface', async () => {
     const database = freshDatabase()
@@ -352,6 +358,81 @@ describe('CounterSaleScreen', () => {
       ).toBeTruthy()
       expect(await database.cart.count()).toBe(1)
     } finally {
+      database.close()
+    }
+  })
+
+  it('shows the on-screen ticket with its operation number after the local close', async () => {
+    /*
+     * W4-FE-4 (SPRINTS.md:230; DESIGN.md:176): la venta termina EN UN TICKET
+     * en pantalla con su número de operación. En un escritorio sin share sheet
+     * el botón Compartir NO existe: la degradación es honesta, no un botón
+     * que no hace nada.
+     */
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+
+    try {
+      render(<CounterSaleScreen database={database} />)
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pan francés, S/ 0.30' }))
+      expect(
+        await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' }),
+      ).toBeTruthy()
+      fireEvent.click(screen.getByTestId('cobrar-button'))
+      fireEvent.click(screen.getByTestId('tender-method-yape'))
+      fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+
+      const ticket = await screen.findByTestId('sale-closed-summary')
+
+      expect(ticket.textContent).toContain('S/ 0.30')
+      expect(screen.queryByTestId('sale-delivery-status')?.textContent).toContain(
+        'el envío queda pendiente',
+      )
+      // El número de operación es el sale_id del payload congelado.
+      expect(screen.getByText(/N.º de operación/)).toBeTruthy()
+      expect(screen.queryByTestId('share-ticket')).toBeNull()
+      expect(screen.getByRole('button', { name: 'Nueva venta' })).toBeTruthy()
+    } finally {
+      database.close()
+    }
+  })
+
+  it('shares the finished sale through the system share sheet with no wa.me path', async () => {
+    const openSpy = vi.spyOn(window, 'open')
+    const share = vi.fn(async (_data?: ShareData): Promise<void> => {})
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+
+    try {
+      render(<CounterSaleScreen database={database} share={asShareInScreen(share)} />)
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pan francés, S/ 0.30' }))
+      expect(
+        await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' }),
+      ).toBeTruthy()
+      fireEvent.click(screen.getByTestId('cobrar-button'))
+      fireEvent.click(screen.getByTestId('tender-method-yape'))
+      fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+
+      fireEvent.click(await screen.findByTestId('share-ticket'))
+
+      await waitFor(() => expect(share).toHaveBeenCalledTimes(1))
+
+      const shareData = share.mock.calls[0]?.[0]
+
+      expect(shareData?.title).toBe('Venta de mostrador')
+      expect(String(shareData?.text)).toContain('S/ 0.30')
+      // Aceptación: la venta comparte por el share sheet del sistema, sin
+      // NINGÚN camino wa.me — ni texto, ni ventana, ni URL.
+      expect(String(shareData?.text)).not.toContain('wa.me')
+      expect(openSpy).not.toHaveBeenCalled()
+      expect(await screen.findByText('Compartido con el sistema.')).toBeTruthy()
+    } finally {
+      vi.restoreAllMocks()
+
       database.close()
     }
   })
