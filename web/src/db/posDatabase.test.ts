@@ -149,6 +149,10 @@ const DECLARED_STORES: readonly {
   // Versión 2 (W2-FE-1): una fila, la sesión offline de este dispositivo. Sin
   // índices: se lee por su clave primaria y nada más.
   { table: 'device_session', primaryKey: 'id', indexes: [] },
+  // Versión 3 (W5-FE-2): el cierre de caja local. La clave es la fecha de
+  // negocio —un cierre por fecha, como la UNIQUE del servidor— e `id` queda
+  // como índice para rastrear el cierre acusado desde su fila.
+  { table: 'cash_closes', primaryKey: 'closed_on', indexes: ['id'] },
 ]
 
 /** Clave primaria y caminos de índice declarados, tabla por tabla. */
@@ -196,9 +200,10 @@ describe('PosDatabase schema', () => {
     // Criterio de W1-FE-4: lo local es el catálogo del tenant, el carrito y la
     // cola. Un volcado del catálogo global no tiene tabla acá (DATABASE.md:160).
     // W2-FE-1 sumó una sola tienda —la sesión offline del dispositivo—, que no
-    // es catálogo.
+    // es catálogo. W5-FE-2 sumó el cierre de caja local, que tampoco lo es.
     expect(declared.map((entry) => entry.name).sort()).toEqual([
       'cart',
+      'cash_closes',
       'device_session',
       'idempotency_queue',
       'products',
@@ -314,6 +319,42 @@ describe('PosDatabase persistence across a reload', () => {
     }
   })
 
+  it('keeps one local cash close per business date across a reload', async () => {
+    /*
+     * W5-FE-2: la clave de la tienda es la fecha de negocio, así que un
+     * segundo cierre de la misma fecha reemplaza al primero en lugar de
+     * convivir con él —la misma regla de la UNIQUE del servidor— y una recarga
+     * de la PWA vuelve a encontrar el cierre para poner el arqueo en lectura.
+     */
+    const database = freshDatabase()
+    await database.open()
+    await database.cash_closes.put({
+      id: 'cierre-local',
+      closed_on: '2026-10-20',
+      created_at: '2026-10-20T22:00:00.000Z',
+      counts: JSON.stringify([]),
+      acknowledged: false,
+    })
+    await database.cash_closes.put({
+      id: 'cierre-que-ya-existia',
+      closed_on: '2026-10-20',
+      created_at: '2026-10-20T22:05:00.000Z',
+      counts: JSON.stringify([]),
+      acknowledged: true,
+    })
+
+    const reopened = reopen(database)
+
+    try {
+      expect(await reopened.cash_closes.count()).toBe(1)
+      expect((await reopened.cash_closes.get('2026-10-20'))?.id).toBe('cierre-que-ya-existia')
+      // La otra fecha no tiene cierre: el arqueo sigue editable.
+      expect(await reopened.cash_closes.get('2026-10-21')).toBeUndefined()
+    } finally {
+      reopened.close()
+    }
+  })
+
   it('keeps the changes written after a reload', async () => {
     const database = freshDatabase()
     await database.open()
@@ -357,12 +398,13 @@ describe('PosDatabase persistence across a reload', () => {
 })
 
 describe('PosDatabase schema upgrade', () => {
-  it('keeps the version-1 data when the schema rises to version 2', async () => {
+  it('keeps the version-1 data when the schema rises to the current version', async () => {
     /*
-     * W2-FE-1 suma una tienda, la sesión offline del dispositivo. Dexie exige
-     * repetir la declaración completa en cada versión, y acá se prueba que
-     * repetirla de verdad preserva lo escrito: catálogo, carrito y cola se
-     * escriben con el esquema de la versión 1 y se releen con el actual.
+     * W2-FE-1 sumó una tienda (la sesión offline del dispositivo) y W5-FE-2 el
+     * cierre de caja local. Dexie exige repetir la declaración completa en cada
+     * versión, y acá se prueba que repetirla de verdad preserva lo escrito:
+     * catálogo, carrito y cola se escriben con el esquema de la versión 1 y se
+     * releen con el actual.
      */
     nextId += 1
     const name = `${POS_DATABASE_NAME}-upgrade-${nextId}`
@@ -383,14 +425,18 @@ describe('PosDatabase schema upgrade', () => {
     try {
       await upgraded.open()
 
-      expect(upgraded.verno).toBe(2)
+      expect(upgraded.verno).toBe(3)
       expect(await upgraded.products.get('prod-1')).toEqual(LOCAL_PRODUCT)
       expect(await upgraded.cart.orderBy('id').toArray()).toEqual(CART_LINES)
       expect(await upgraded.idempotency_queue.orderBy('id').toArray()).toEqual(QUEUED_EVENTS)
 
-      // La tienda nueva existe y arranca vacía: migrar no inventa una sesión.
-      expect(upgraded.tables.map((table) => table.name).sort()).toContain('device_session')
+      // Las tiendas nuevas existen y arrancan vacías: migrar no inventa una
+      // sesión ni un cierre.
+      expect(upgraded.tables.map((table) => table.name).sort()).toEqual(
+        expect.arrayContaining(['cash_closes', 'device_session']),
+      )
       expect(await upgraded.device_session.count()).toBe(0)
+      expect(await upgraded.cash_closes.count()).toBe(0)
     } finally {
       upgraded.close()
     }

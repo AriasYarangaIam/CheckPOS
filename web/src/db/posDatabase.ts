@@ -139,6 +139,31 @@ export interface DeviceSessionRow {
   readonly pin_verifier: string
 }
 
+/**
+ * Cierre de caja local de UNA fecha de negocio (W5-FE-2; docs/DESIGN.md
+ * §194-198; decisión F37 del sprint). Es lo que vuelve el arqueo de una fecha
+ * ya cerrada de **solo lectura**: reabrir la pantalla muestra el cierre
+ * guardado, no un formulario editable.
+ *
+ * La clave primaria es `closed_on` y no `id`: el contrato tiene UN cierre por
+ * fecha de negocio y tenant (`UNIQUE (tenant_id, closed_on)`), así que la misma
+ * regla se impone acá sin una segunda consulta. `counts` guarda el desglose
+ * serializado de los seis métodos —la proyección local primero y el congelado
+ * del servidor cuando el acuse llega—; `acknowledged` es la única diferencia
+ * entre un cierre que el servidor confirmó y uno que solo existe en el
+ * dispositivo.
+ */
+export interface CashCloseRow {
+  /** `cash_closes.id` del servidor, o el id que el cliente propuso al cerrar. */
+  readonly id: string
+  /** Fecha de negocio LOCAL (`YYYY-MM-DD`); es también la clave primaria. */
+  readonly closed_on: string
+  readonly created_at: string
+  /** `CashCloseCountLine[]` serializado, en el orden fijo de los seis métodos. */
+  readonly counts: string
+  readonly acknowledged: boolean
+}
+
 /** Nombre por defecto de la base. */
 export const POS_DATABASE_NAME = 'pos-saas'
 
@@ -148,6 +173,7 @@ export class PosDatabase extends Dexie {
   cart!: Table<CartRow, string>
   idempotency_queue!: Table<IdempotencyQueueRow, string>
   device_session!: Table<DeviceSessionRow, string>
+  cash_closes!: Table<CashCloseRow, string>
 
   constructor(name: string = POS_DATABASE_NAME) {
     super(name)
@@ -186,6 +212,26 @@ export class PosDatabase extends Dexie {
       cart: 'id, product_id',
       idempotency_queue: 'id, key, status, created_at',
       device_session: 'id',
+    })
+
+    /*
+     * Versión 3 (W5-FE-2): una sola tienda nueva, el cierre de caja local.
+     *
+     * La clave primaria es `closed_on` porque el contrato tiene UN cierre por
+     * fecha de negocio y tenant (`docs/DATABASE.md` §4 `cash_closes`, D10): la
+     * misma regla queda impuesta por el esquema local. `id` se declara como
+     * índice solo para poder rastrear un cierre acusado desde su fila.
+     *
+     * Las cuatro tiendas anteriores se repiten **idénticas**, con la misma
+     * convención de las versiones 1 y 2: el esquema completo se lee en cada
+     * versión aunque Dexie herede lo que no se repite.
+     */
+    this.version(3).stores({
+      products: 'id, gtin, name, category',
+      cart: 'id, product_id',
+      idempotency_queue: 'id, key, status, created_at',
+      device_session: 'id',
+      cash_closes: 'closed_on, id',
     })
   }
 }
