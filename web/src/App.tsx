@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { ConnectivityBadge } from '@/components/ConnectivityBadge'
+import { PendingSyncBadge } from '@/components/PendingSyncBadge'
 import { CounterSaleScreen } from '@/screens/CounterSaleScreen'
 import { EmployeeAccessScreen } from '@/screens/EmployeeAccessScreen'
 
@@ -30,7 +31,15 @@ export function App() {
     <div className="flex min-h-screen flex-col bg-surface-bg text-text-primary">
       <header className="flex items-center justify-between gap-2 border-b border-surface-border bg-surface-card px-4 py-3">
         <h1 className="text-heading-md font-bold">POS SaaS</h1>
-        <ConnectivityBadge />
+        {/*
+         * Los dos badges de estado van juntos al lado opuesto del wordmark: el
+         * de conectividad (W2-FE-2) y el de ventas por sincronizar (W5-FE-1).
+         * Los dos crecen hacia su lado libre, sin desplazar al resto de la fila.
+         */}
+        <div className="flex items-center gap-2">
+          <PendingSyncBadge />
+          <ConnectivityBadge />
+        </div>
       </header>
       <main className="flex-1">
         {unlocked ? (

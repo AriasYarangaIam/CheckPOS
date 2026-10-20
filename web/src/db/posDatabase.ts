@@ -1,5 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 
+import type { TenderMethod } from '@/sales/tenderMethods'
+
 /**
  * Esquema de la base local (docs/FRONTEND.md TASK 2.1). Guarda tres cosas y
  * solo tres: la proyección local del catálogo del tenant, el carrito en curso y
@@ -68,7 +70,24 @@ export interface CartRow {
  */
 export type QueueStatus = 'pending' | 'in_flight' | 'completed' | 'failed'
 
-/** Evento pendiente de sincronizar, con la clave de idempotencia que lo cubre. */
+/**
+ * Qué evento guarda la fila. La cola nació en el Sprint 1 sin consumidor; el
+ * Sprint 5 la usa para la venta cerrada y el cierre de caja, y el contrato ya
+ * tiene el camino de la anulación (`POST /sales/{id}/void`, sin superficie de
+ * UI todavía).
+ */
+export type QueueOperation = 'sale' | 'void' | 'cash_close'
+
+/**
+ * Evento pendiente de sincronizar, con la clave de idempotencia que lo cubre.
+ *
+ * Las columnas de proyección (`business_date`, `payment_method`,
+ * `total_cents`) son copias CONGELADAS del cuerpo serializado, no un segundo
+ * cálculo: el arqueo agrupa por método y fecha de negocio lo que el evento ya
+ * cerró, sin volver a mirar las líneas (`docs/DATABASE.md` §2.3; SPRINTS.md
+ * W5-FE-2). `last_error` conserva el código del servidor que dejó la fila en
+ * `failed`; es informativo y nunca reemplaza al estado.
+ */
 export interface IdempotencyQueueRow {
   readonly id: string
   /** Clave `(tenant_id, key)` de la operación; la unicidad la fija el servidor. */
@@ -78,6 +97,17 @@ export interface IdempotencyQueueRow {
   readonly status: QueueStatus
   /** Marca de tiempo ISO 8601 del encolado. */
   readonly created_at: string
+  readonly operation: QueueOperation
+  /** Fecha de negocio LOCAL congelada por el evento (`YYYY-MM-DD`). */
+  readonly business_date: string
+  /** Venta del evento: la del cierre o la que la anulación compensa. */
+  readonly sale_id: string | null
+  /** Método de pago congelado; el arqueo agrupa por este campo. */
+  readonly payment_method: TenderMethod | null
+  /** Total congelado en centavos enteros; nunca se recomputa de las líneas. */
+  readonly total_cents: number
+  /** Código del último error del servidor, si la fila quedó en `failed`. */
+  readonly last_error: string | null
 }
 
 /**

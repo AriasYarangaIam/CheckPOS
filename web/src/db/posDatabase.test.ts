@@ -78,6 +78,12 @@ const QUEUED_EVENTS: readonly IdempotencyQueueRow[] = [
     payload: JSON.stringify({ total_cents: 1950, payment_method: 'efectivo' }),
     status: 'pending',
     created_at: '2026-10-15T09:15:00.000Z',
+    operation: 'sale',
+    business_date: '2026-10-15',
+    sale_id: 'sale-0001',
+    payment_method: 'cash',
+    total_cents: 1950,
+    last_error: null,
   },
   {
     id: 'event-2',
@@ -85,6 +91,12 @@ const QUEUED_EVENTS: readonly IdempotencyQueueRow[] = [
     payload: JSON.stringify({ total_cents: 480, payment_method: 'yape' }),
     status: 'completed',
     created_at: '2026-10-15T09:21:30.000Z',
+    operation: 'sale',
+    business_date: '2026-10-15',
+    sale_id: 'sale-0002',
+    payment_method: 'yape',
+    total_cents: 480,
+    last_error: null,
   },
 ]
 
