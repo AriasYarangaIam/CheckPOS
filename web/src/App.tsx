@@ -1,4 +1,7 @@
+import { useState } from 'react'
+
 import { ConnectivityBadge } from '@/components/ConnectivityBadge'
+import { CounterSaleScreen } from '@/screens/CounterSaleScreen'
 import { EmployeeAccessScreen } from '@/screens/EmployeeAccessScreen'
 
 /**
@@ -14,10 +17,15 @@ import { EmployeeAccessScreen } from '@/screens/EmployeeAccessScreen'
  * un landmark `banner` y no un `header` con scope de contenido— y el shell no
  * pide nada al servidor antes de autenticar: el tenant sale del token y de
  * ningún otro lado (`ARCHITECTURE.md:23`), así que no hay datos de tenant que
- * traer en el arranque. La venta, el carrito y el checkout son unidades
- * posteriores (docs/FRONTEND.md:80-106).
+ * traer en el arranque.
+ *
+ * Tras el desbloqueo del PIN el shell sustituye la pantalla de acceso por la
+ * venta de mostrador (W4-FE-1): la autenticación offline no lleva token, así
+ * que el shell no pide nada a la red para mostrar la operación.
  */
 export function App() {
+  const [unlocked, setUnlocked] = useState(false)
+
   return (
     <div className="flex min-h-screen flex-col bg-surface-bg text-text-primary">
       <header className="flex items-center justify-between gap-2 border-b border-surface-border bg-surface-card px-4 py-3">
@@ -25,7 +33,11 @@ export function App() {
         <ConnectivityBadge />
       </header>
       <main className="flex-1">
-        <EmployeeAccessScreen />
+        {unlocked ? (
+          <CounterSaleScreen />
+        ) : (
+          <EmployeeAccessScreen onUnlocked={() => setUnlocked(true)} />
+        )}
       </main>
     </div>
   )

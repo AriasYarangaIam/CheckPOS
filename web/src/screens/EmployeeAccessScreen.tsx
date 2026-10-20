@@ -32,6 +32,12 @@ import { getPosDatabase, type DeviceSessionRow, type PosDatabase } from '@/db/po
 export interface EmployeeAccessScreenProps {
   /** Inyectable para las pruebas; en producción es la base local de la PWA. */
   readonly database?: PosDatabase
+  /**
+   * Aviso de sesión desbloqueada. El shell lo usa para sustituir esta pantalla
+   * por la venta de mostrador (W4-FE-1); sin el prop, la pantalla sigue
+   * mostrando su tarjeta de estado —así lo ejercitan las pruebas de W2-FE-1—.
+   */
+  readonly onUnlocked?: () => void
 }
 
 /** Patrón háptico del error (§5.2:266), solo donde hay motor de vibración. */
@@ -69,6 +75,7 @@ function vibrateError(): void {
 
 export function EmployeeAccessScreen({
   database = getPosDatabase(),
+  onUnlocked,
 }: EmployeeAccessScreenProps) {
   // `undefined` es «todavía no leí la sesión»; `null` es «este teléfono no está
   // vinculado». La distinción importa: el primero deshabilita el teclado, el
@@ -176,6 +183,10 @@ export function EmployeeAccessScreen({
     // retenido en el estado de React ni se puede releer de un render.
     setEntry('')
     setVerdict(outcome)
+
+    // El shell decide qué viene después del desbloqueo: esta pantalla solo
+    // avisa. El cordón es un evento único por veredicto.
+    if (outcome.status === 'unlocked') onUnlocked?.()
   }
 
   function press(key: NumpadKey): void {
@@ -237,7 +248,7 @@ export function EmployeeAccessScreen({
         <div className="flex flex-col gap-1 rounded-xl border border-surface-border bg-surface-card p-4">
           <p className="text-heading-md font-bold">Sesión desbloqueada</p>
           <p className="text-body-sm text-text-secondary">
-            La venta de mostrador llega en la próxima unidad de trabajo.
+            La venta de mostrador quedó disponible en esta sesión.
           </p>
         </div>
       ) : null}

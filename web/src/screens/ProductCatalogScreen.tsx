@@ -42,10 +42,18 @@ function filtersByName(product: ProductRow, query: string): boolean {
 export interface ProductCatalogScreenProps {
   /** Inyectable para las pruebas; en producción es la base local de la PWA. */
   readonly database?: PosDatabase
+  /**
+   * Destinatario del código identificado. Por defecto el agregado mínimo va
+   * contra el carrito (`addIdentifiedLine`); el escáner best-effort de W4-FE-3
+   * comparte ese mismo camino desde su segmento, así que el hospedador puede
+   * pasar un único recipiente para grilla y cámara.
+   */
+  readonly onProductIdentified?: (code: string) => void
 }
 
 export function ProductCatalogScreen({
   database = getPosDatabase(),
+  onProductIdentified,
 }: ProductCatalogScreenProps) {
   // `undefined` es «la base todavía no respondió»; el arreglo vacío es el
   // estado vacío honesto de un tenant sin productos sincronizados.
@@ -87,7 +95,16 @@ export function ProductCatalogScreen({
         )
 
   function identify(code: string): void {
-    void addIdentifiedLine(code, database)
+    // Camino por defecto: la grilla agrega al carrito con el debounce de
+    // W4-FE-1 (docs/FRONTEND.md:104-106); un hospedador puede pasar su propio
+    // recipiente para que grilla y escáner compartan el mismo camino.
+    if (onProductIdentified === undefined) {
+      void addIdentifiedLine(code, database)
+
+      return
+    }
+
+    onProductIdentified(code)
   }
 
   return (

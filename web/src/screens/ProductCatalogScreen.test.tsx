@@ -287,8 +287,11 @@ describe('ProductCatalogScreen', () => {
     expect(line).toEqual({
       id: expect.any(String),
       product_id: 'prod-3',
-      qty: 1,
+      qty: '1',
       unit_price_cents: 30,
+      name: 'Pan francés',
+      uom: 'unit',
+      voided: false,
     })
 
     database.close()

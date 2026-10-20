@@ -51,8 +51,24 @@ afterEach(async () => {
  * que no existe una aserción de tiempo de ejecución equivalente.
  */
 const CART_LINES: readonly CartRow[] = [
-  { id: 'line-1', product_id: 'prod-1', qty: 2, unit_price_cents: 350 },
-  { id: 'line-2', product_id: 'prod-2', qty: 1, unit_price_cents: 1250 },
+  {
+    id: 'line-1',
+    product_id: 'prod-1',
+    qty: '2',
+    unit_price_cents: 350,
+    name: 'Arroz Costeño 1kg',
+    uom: 'unit',
+    voided: false,
+  },
+  {
+    id: 'line-2',
+    product_id: 'prod-2',
+    qty: '1',
+    unit_price_cents: 1250,
+    name: 'Aceite Primor 900ml',
+    uom: 'unit',
+    voided: false,
+  },
 ]
 
 const QUEUED_EVENTS: readonly IdempotencyQueueRow[] = [
@@ -292,12 +308,12 @@ describe('PosDatabase persistence across a reload', () => {
     await database.cart.add(CART_LINES[0])
 
     const reopened = reopen(database)
-    await reopened.cart.update('line-1', { qty: 5 })
+    await reopened.cart.update('line-1', { qty: '5' })
 
     const second = reopen(reopened)
 
     try {
-      expect((await second.cart.get('line-1'))?.qty).toBe(5)
+      expect((await second.cart.get('line-1'))?.qty).toBe('5')
     } finally {
       second.close()
     }
