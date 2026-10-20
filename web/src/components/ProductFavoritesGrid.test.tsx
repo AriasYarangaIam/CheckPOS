@@ -183,9 +183,13 @@ describe('ProductFavoritesGrid', () => {
     expect(line).toEqual({
       id: expect.any(String),
       product_id: 'prod-1',
-      qty: 1,
-      // El precio se congela al agregar, tal como lo fija la fila del carrito.
+      qty: '1',
+      // El precio, el nombre y la unidad se congelan al agregar, tal como los
+      // fija la fila del carrito de W4-FE-1.
       unit_price_cents: 350,
+      name: 'Arroz Costeño 1kg',
+      uom: 'unit',
+      voided: false,
     })
 
     // El granel también enclosure su línea, con el código que sí resuelve:
@@ -201,8 +205,11 @@ describe('ProductFavoritesGrid', () => {
     ).toEqual({
       id: expect.any(String),
       product_id: 'prod-2',
-      qty: 1,
+      qty: '1',
       unit_price_cents: 30,
+      name: 'Pan francés',
+      uom: 'unit',
+      voided: false,
     })
 
     database.close()

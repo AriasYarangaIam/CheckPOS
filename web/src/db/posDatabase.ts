@@ -31,13 +31,33 @@ export interface ProductRow {
   readonly category: string | null
 }
 
-/** Línea del carrito en curso. */
+/**
+ * Línea del carrito en curso. Los campos del comercio viajan congelados al
+ * agregar la línea («name», «uom», precio): es exactamente la forma §4.9 que
+ * `POST /sales` pide congelada, así que el cierre la serializa tal cual
+ * (docs/DATABASE.md §4.9 `sale_lines`).
+ */
 export interface CartRow {
   readonly id: string
   readonly product_id: string
-  readonly qty: number
+  /**
+   * Cantidad en el TEXTO exacto del contrato (§2.4): «1», «0.500», «2.750».
+   * El importe de línea lo redondea el cierre half-up sobre esta mantisa
+   * (`@/lib/decimal`).
+   */
+  readonly qty: string
   /** Precio congelado al agregar la línea, en centavos enteros. */
   readonly unit_price_cents: number
+  /** Nombre del producto congelado al agregar la línea. */
+  readonly name: string
+  /** Unidad de medida congelada al agregar la línea (`unit`, `kg`, …). */
+  readonly uom: string
+  /**
+   * Línea anulada en mostrador: la fila permanece visible (tachada) y sale de
+   * los importes y del cierre. La venta nunca viaja con una línea nula: el
+   * cierre solo toma las líneas que no están anuladas.
+   */
+  readonly voided: boolean
 }
 
 /**
