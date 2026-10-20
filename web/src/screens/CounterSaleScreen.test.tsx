@@ -3,9 +3,9 @@ import 'fake-indexeddb/auto'
 
 import Dexie from 'dexie'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { syncCatalogFromApi } from '@/catalog/catalogCache'
+import { resetIdentifiedTapMemory } from '@/cart/identifiedLine'
 import { POS_DATABASE_NAME, PosDatabase, type ProductRow } from '@/db/posDatabase'
 import { CounterSaleScreen } from '@/screens/CounterSaleScreen'
 
@@ -42,6 +42,12 @@ function freshDatabase(): PosDatabase {
 afterEach(async () => {
   await Promise.all([...createdNames].map((name) => Dexie.delete(name)))
   createdNames.clear()
+})
+
+beforeEach(() => {
+  // La memoria del doble toque es estado del módulo (un device = uno): cada
+  // prueba empieza sin gesto previo, igual que un device recién cargado.
+  resetIdentifiedTapMemory()
 })
 
 describe('CounterSaleScreen', () => {
@@ -118,6 +124,71 @@ describe('CounterSaleScreen', () => {
       await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
 
       expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.restoreAllMocks()
+
+      database.close()
+    }
+  })
+
+  it('walks grid → cart → checkout → local close, with the POST after the close', async () => {
+    /*
+     * El cobro NO espera la red (ARCHITECTURE.md:98): `Finalizar venta`
+     * cierra localmente y muestra la venta cerrada antes de que el POST
+     * responda. El POST va con su clave de idempotencia y el método elegido
+     * es el que viaja a `sales.payment_method`.
+     */
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+
+    const saleResponses: Request[] = []
+    const fetchSpy = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      saleResponses.push(new Request('/sales', init))
+
+      return new Response(
+        JSON.stringify({ sale: { sale_id: '00000000-0000-0000-0000-000000000009' } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    })
+
+    try {
+      render(<CounterSaleScreen database={database} token="token-de-la-sesion" fetchImpl={fetchSpy as unknown as typeof fetch} />)
+
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      // Grilla → línea del carrito: el panel muestra los controles de línea
+      // cuando la mutación persistió (el sincronizador es la UI, no el reloj).
+      fireEvent.click(screen.getByRole('button', { name: 'Pan francés, S/ 0.30' }))
+      expect(
+        await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' }),
+      ).toBeTruthy()
+
+      // Barra inferior → checkout.
+      fireEvent.click(screen.getByTestId('cobrar-button'))
+
+      expect(screen.getByText('Cobrar')).toBeTruthy()
+
+      // Tender único: el método elegido es el que fija el payload.
+      fireEvent.click(screen.getByTestId('tender-method-yape'))
+      fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+
+      // La venta ya cerró localmente: la superficie exacta del ticket llega
+      // en W4-FE-4; acá se dice la verdad sin fingir una remotamente.
+      await screen.findByTestId('sale-closed-summary')
+      expect(await fetchSpy).toHaveBeenCalled()
+
+      const [url, requestInit] = (fetchSpy.mock.calls[0] ?? []) as [
+        string,
+        (RequestInit & { body: string }) | undefined,
+      ]
+
+      expect(url).toBe('/sales')
+      expect((requestInit?.headers as Record<string, string>)['idempotency-key']).toBeTruthy()
+      expect(JSON.parse(requestInit!.body).payment_method).toBe('yape')
+      expect(JSON.parse(requestInit!.body).total_cents).toBe(30)
+
+      // El carrito quedó vacío tras el cierre local.
+      expect(await database.cart.count()).toBe(0)
     } finally {
       vi.restoreAllMocks()
 
