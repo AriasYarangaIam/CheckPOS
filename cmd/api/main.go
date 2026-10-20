@@ -21,6 +21,7 @@
 //	PATCH /products/{id}     columna tipada, stock inmutable por la superficie y LWW
 //	GET  /gtin-lookup       mediación read-only del catálogo global (Sprint 3, W3-BE-2)
 //	POST /sales             cierre de venta congelado y transaccional (Sprint 4, W4-BE-1)
+//	POST /cash-closes       cierre de caja: proyección F8 por método (Sprint 5, W5-BE-1)
 //	POST /photos            upload multipart: 200 con la URL del objeto, sin bytes en la
 //	                        base (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3)
 //
@@ -40,6 +41,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/AriasYarangaIam/CheckPOS/internal/cashclose"
 	"github.com/AriasYarangaIam/CheckPOS/internal/catalog"
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
 	"github.com/AriasYarangaIam/CheckPOS/internal/ledger"
@@ -224,7 +226,17 @@ func run() error {
 	// venta apendiza `sales` + `sale_lines` + `stock_adjustments` dentro de una sola
 	// transacción de tenant (docs/BACKEND.md §4.9). El store es el único camino de datos
 	// de `sales`.
-	sales, err := ledger.NewSalesHandler(ledger.NewPostgresSaleStore(postgres.NewTenantPool(pool)), logger)
+	saleStore := ledger.NewPostgresSaleStore(postgres.NewTenantPool(pool))
+
+	sales, err := ledger.NewSalesHandler(saleStore, logger)
+	if err != nil {
+		return err
+	}
+
+	// El cierre de caja (Sprint 5, W5-BE-1) corre sobre el MISMO pool de negocio: proyecta
+	// `sales` con F8 y escribe sus dos tablas dentro de una sola transacción de tenant
+	// (docs/BACKEND.md §4.13). El store es el único camino de datos del cierre.
+	cashCloses, err := cashclose.NewCashCloseHandler(cashclose.NewPostgresCashCloseStore(postgres.NewTenantPool(pool)), logger)
 	if err != nil {
 		return err
 	}
@@ -260,6 +272,9 @@ func run() error {
 			mux.Handle("GET /gtin-lookup", identity.RequireAccessToken(issuer, gtinLookup))
 			// El cierre de venta: tenant y usuario SOLO por los claims del token (§4.9).
 			mux.Handle("POST /sales", identity.RequireAccessToken(issuer, sales))
+			// El cierre de caja: proyección del ledger por método y conteo del operador
+			// (§4.13), con el duplicado de fecha como no-op silencioso (§6.9).
+			mux.Handle("POST /cash-closes", identity.RequireAccessToken(issuer, cashCloses))
 			// El upload de fotos: multipart, 200 con la URL pública del objeto y NINGÚN byte
 			// en la base (docs/BACKEND.md §10.3).
 			mux.Handle("POST /photos", identity.RequireAccessToken(issuer, photosHandler))
