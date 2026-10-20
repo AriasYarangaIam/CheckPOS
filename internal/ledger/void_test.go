@@ -204,6 +204,14 @@ func TestVoidRejectsAnUnusableBody(t *testing.T) {
 			wantField:  "sold_on",
 		},
 		{
+			name:       "the void id equals the original sale id",
+			originalID: saleAID,
+			body:       `{"id": "` + saleAID + `", "sold_on": "2026-10-19"}`,
+			wantStatus: http.StatusUnprocessableEntity,
+			wantCode:   httpx.CodeValidationError,
+			wantField:  "id",
+		},
+		{
 			name:       "the path id cannot name a sale",
 			originalID: "no-es-uuid",
 			body:       validVoidBody(),

@@ -159,6 +159,13 @@ func parseVoidInput(request *voidRequest, originalID string) (VoidInput, *httpx.
 		return VoidInput{}, httpx.NotFound("the sale does not exist in this tenant for that business date")
 	}
 
+	// La fila compensatoria no puede tener el id del original: la PK es (sold_on, sale_id),
+	// así que el INSERT chocaría con la venta misma. Es un cuerpo inservible —dos ids
+	// distintos son el contrato— y se nombra el campo del cuerpo.
+	if voidID == original {
+		return VoidInput{}, validation("id must be the uuid of the void row, different from the original sale id", "id")
+	}
+
 	return VoidInput{
 		ID:         voidID,
 		OriginalID: original,
