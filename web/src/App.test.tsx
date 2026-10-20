@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '@/App'
+import { clearDeviceSession, saveDeviceSession } from '@/auth/deviceSession'
 
 /*
  * Shell de la PWA. La unidad W2-FE-1 lo convirtió en la entrada real de la
@@ -145,5 +146,35 @@ describe('App shell', () => {
 
     // La vuelta de la conexión tampoco interrumpe: el numpad sigue operable.
     await waitForNumpad()
+  })
+
+  it('replaces the access screen with the counter sale after the PIN unlocks', async () => {
+    /*
+     * W4-FE-1 conecta el shell con la venta: un PIN correcto dentro de la
+     * ventana desbloquea y el shell muestra la venta de mostrador, sin pedir
+     * nada a la red (el desbloqueo offline no lleva token).
+     */
+    const validUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+
+    await saveDeviceSession({
+      deviceId: 'device-app-test',
+      userId: 'user-app-test',
+      validUntil,
+      pin: '1357',
+    })
+
+    try {
+      render(<App />)
+      await waitForNumpad()
+
+      fireEvent.click(screen.getByRole('button', { name: '1' }))
+      fireEvent.click(screen.getByRole('button', { name: '3' }))
+      fireEvent.click(screen.getByRole('button', { name: '5' }))
+      fireEvent.click(screen.getByRole('button', { name: '7' }))
+
+      await screen.findByText('Punto de venta')
+    } finally {
+      await clearDeviceSession()
+    }
   })
 })

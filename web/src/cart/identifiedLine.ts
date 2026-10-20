@@ -1,29 +1,23 @@
 import { getPosDatabase, type CartRow, type PosDatabase, type ProductRow } from '@/db/posDatabase'
+import { notifyCartChanged } from '@/cart/cartStore'
+import { addUnit, formatDecimalQty, parseDecimalQty } from '@/lib/decimal'
 
 /**
- * Mínimo del camino Input → Cart para W3-FE-1 (ARCHITECTURE.md:37, :80): un
- * adaptador de entrada emite `onProductIdentified(code)` y acá se resuelve el
- * código contra el catálogo que ya vive en la base local.
+ * Agregado de línea identificado — la frontera donde la grilla y el escáner
+ * dejan su código y el carrito resuelve (docs/DESIGN.md §1.2:135-141).
  *
- * La regla del contrato: el código NO es la identidad del producto. Puede ser
- * el GTIN —el mismo código que un día traerá la cámara— o, para el granel sin
- * GTIN (pan, huevos, hielo), el id local de la fila. La resolución es tarea del
- * carrito y el adaptador nunca conoce precios ni stock (ARCHITECTURE.md:37).
+ * **Doble toque.** W3-FE-1 dejó la grilla sin debounce a propósito; W4-FE-1 lo
+ * agrega acá (docs/FRONTEND.md:104-106): los toques repetidos rápidos sobre el
+ * MISMO código dentro de la ventana —el gesto físico mal disparado— producen
+ * UNA línea con cantidad UNO (SPRINTS.md W4-FE-1). La ventana es corta
+ * (350 ms): el toque deliberado de la segunda unidad, que llega después, cae
+ * fuera y agrupa sobre la misma línea en lugar de crear otra.
  *
- * El alcance de W3 se corta en una línea de qty 1 con el precio congelado.
- * La fusión de cantidades (el micro-badge `×2`), el debounce anti doble toque,
- * el override de precio y el resto de la semántica de mutaciones son de
- * W4-FE-1; acá solo existe el agregado mínimo que la grilla necesita.
+ * **Congelado §4.9.** Cada línea congela nombre, unidad y precio al agregar:
+ * un cambio de catálogo después del toque no renombra lo que el cajero ya
+ * sumó, y el cierre serializa los congelados tal cual los pide el POST.
  */
 
-/**
- * Resuelve el código de un adaptador contra el subconjunto local del catálogo.
- *
- * Primero el GTIN indexado —el equivalente de la lectura del escáner— y, si el
- * código no es un GTIN, la clave primaria: es el camino del granel, cuyo código
- * emitido es su id. Devuelve `null` cuando nada resuelve: el carrito no
- * inventa líneas para códigos desconocidos.
- */
 export async function resolveIdentifiedProduct(
   code: string,
   database: PosDatabase = getPosDatabase(),
@@ -40,32 +34,105 @@ export async function resolveIdentifiedProduct(
   return byGtin[0] ?? (await database.products.get(trimmed)) ?? null
 }
 
+export interface AddIdentifiedLineOptions {
+  /** Reloj inyectable para las pruebas; en producción es el del dispositivo. */
+  readonly now?: () => number
+  /**
+   * Ventana del doble toque en ms. 350 cubre el rebote del gesto y no se come
+   * la suma rápida de unidades deliberada.
+   */
+  readonly debounceMs?: number
+}
+
+/** Ventana anti doble toque por defecto: el gesto rebota dentro de los 350 ms. */
+export const DEFAULT_TAP_DEBOUNCE_MS = 350
+
+/** Último toque registrado por código — estado del módulo, un device = uno. */
+const lastIdentifiedAddAt = new Map<string, number>()
+
+/** Borra la memoria de toques (las pruebas empiezan sin gesto previo). */
+export function resetIdentifiedTapMemory(): void {
+  lastIdentifiedAddAt.clear()
+}
+
 /**
- * Agrega una única línea al carrito en curso: qty 1 y el precio congelado al
- * instante del agregado (la intencionalidad de `CartRow.unit_price_cents`).
- * Devuelve la línea escrita, o `null` si el código no resolvió contra el
- * catálogo local.
+ * Devuelve la línea activa (sin anular, precio de lista) del mismo producto,
+ * o `null`. Agrupar sobre la línea activa es lo que hace que una venta tenga
+ * una línea por producto y no una por toque.
+ */
+async function activeLineOfProduct(
+  productId: string,
+  listPriceCents: number,
+  database: PosDatabase,
+): Promise<CartRow | null> {
+  const candidates = await database.cart.where('product_id').equals(productId).toArray()
+
+  return (
+    candidates.find(
+      (line) => !line.voided && line.unit_price_cents === listPriceCents,
+    ) ?? null
+  )
+}
+
+/**
+ * Agrega (o agrupa) la línea del producto identificado y PERSISTE la
+ * mutación completa antes de volver: el carrito vive en IndexedDB, no en
+ * memoria de React (docs/FRONTEND.md:99; ARCHITECTURE.md:38).
+ *
+ * Devuelve la línea afectada, `null` si el código no resolvió contra el
+ * catálogo local, o la línea que ya estaba si el toque cayó dentro de la
+ * ventana del doble toque.
  */
 export async function addIdentifiedLine(
   code: string,
   database: PosDatabase = getPosDatabase(),
+  options: AddIdentifiedLineOptions = {},
 ): Promise<CartRow | null> {
-  const product = await resolveIdentifiedProduct(code, database)
+  const trimmed = code.trim()
+  const product = await resolveIdentifiedProduct(trimmed, database)
 
   if (product === null) return null
+
+  const now = (options.now ?? Date.now)()
+  const debounceMs = options.debounceMs ?? DEFAULT_TAP_DEBOUNCE_MS
+  const lastAddAt = lastIdentifiedAddAt.get(trimmed)
+
+  if (lastAddAt !== undefined && now - lastAddAt < debounceMs) {
+    return activeLineOfProduct(product.id, product.price_cents, database)
+  }
+
+  lastIdentifiedAddAt.set(trimmed, now)
+
+  const existing = await activeLineOfProduct(product.id, product.price_cents, database)
+
+  if (existing !== null) {
+    const currentQty = parseDecimalQty(existing.qty)
+    const next = currentQty === null ? null : formatDecimalQty(addUnit(currentQty))
+
+    if (next === null) return existing
+
+    const bumped: CartRow = { ...existing, qty: next }
+
+    await database.cart.put(bumped)
+    notifyCartChanged()
+
+    return bumped
+  }
 
   const line: CartRow = {
     // El id de la línea nace local: el carrito es del dispositivo y su
     // identidad completa la define el equipo, no el servidor.
     id: crypto.randomUUID(),
     product_id: product.id,
-    qty: 1,
+    qty: '1',
     unit_price_cents: product.price_cents,
+    name: product.name,
+    uom: product.uom,
+    voided: false,
   }
 
-  // Cada mutación persiste: el carrito vive en IndexedDB, no en memoria de
-  // React (docs/FRONTEND.md:99; ARCHITECTURE.md:38).
   await database.cart.add(line)
+  notifyCartChanged()
 
   return line
 }
