@@ -7,12 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { syncCatalogFromApi } from '@/catalog/catalogCache'
 import { resetIdentifiedTapMemory } from '@/cart/identifiedLine'
 import { POS_DATABASE_NAME, PosDatabase, type ProductRow } from '@/db/posDatabase'
+import type { BarcodeDetectorLike } from '@/scanner/ProductScanner'
 import { CounterSaleScreen } from '@/screens/CounterSaleScreen'
 
 /*
- * Pantalla de venta de mostrador (W4-FE-1): la grilla entrega el código y el
- * panel del carrito vive en la misma pantalla. El resto del flujo (checkout,
- * ticket) son unidades posteriores de este slice.
+ * Pantalla de venta de mostrador (W4-FE-1..3): la grilla entrega el código y el
+ * panel del carrito vive en la misma pantalla; el escáner es un segmento
+ * best-effort que comparte el mismo camino hacia el carrito. El ticket real
+ * llega en W4-FE-4.
  */
 
 const createdNames = new Set<string>()
@@ -49,6 +51,20 @@ beforeEach(() => {
   // prueba empieza sin gesto previo, igual que un device recién cargado.
   resetIdentifiedTapMemory()
 })
+
+function fakeStream(): { stream: MediaStream; stop: ReturnType<typeof vi.fn> } {
+  const stop = vi.fn()
+
+  const stream = { getTracks: () => [{ stop }] } as unknown as MediaStream
+
+  return { stream, stop }
+}
+
+function asGetUserMedia(
+  stub: ReturnType<typeof vi.fn>,
+): typeof navigator.mediaDevices.getUserMedia {
+  return stub as unknown as typeof navigator.mediaDevices.getUserMedia
+}
 
 describe('CounterSaleScreen', () => {
   it('hosts the products grid and the cart on the same sale surface', async () => {
@@ -175,7 +191,8 @@ describe('CounterSaleScreen', () => {
       // La venta ya cerró localmente: la superficie exacta del ticket llega
       // en W4-FE-4; acá se dice la verdad sin fingir una remotamente.
       await screen.findByTestId('sale-closed-summary')
-      expect(await fetchSpy).toHaveBeenCalled()
+      // El POST sale DESPUÉS del cierre local: llega al servidor cuando llega.
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalled())
 
       const [url, requestInit] = (fetchSpy.mock.calls[0] ?? []) as [
         string,
@@ -192,6 +209,149 @@ describe('CounterSaleScreen', () => {
     } finally {
       vi.restoreAllMocks()
 
+      database.close()
+    }
+  })
+
+  it('starts on the products segment and mounts the camera scanner on demand', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
+
+    const { stream, stop } = fakeStream()
+    const getUserMedia = vi.fn(async () => stream)
+    const detector: BarcodeDetectorLike = { detect: async () => [] }
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+
+    try {
+      render(
+        <CounterSaleScreen
+          database={database}
+          getUserMedia={asGetUserMedia(getUserMedia)}
+          createBarcodeDetector={async () => detector}
+        />,
+      )
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      // §1.2:134 — Productos (grilla) es la vista por defecto; la cámara es
+      // best-effort y se enciende solo cuando el cajero la pide.
+      expect(
+        screen.getByRole('button', { name: 'Productos' }).getAttribute('aria-pressed'),
+      ).toBe('true')
+      expect(screen.queryByTestId('scanner-viewport')).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Escáner' }))
+
+      expect(await screen.findByTestId('scanner-viewport')).toBeTruthy()
+      expect(getUserMedia).toHaveBeenCalledWith({ video: true, audio: false })
+
+      // Volver al segmento Productos apaga la cámara (el cleanup detiene el stream).
+      fireEvent.click(screen.getByRole('button', { name: 'Productos' }))
+      await waitFor(() => expect(screen.queryByTestId('scanner-viewport')).toBeNull())
+      expect(stop).toHaveBeenCalled()
+    } finally {
+      database.close()
+    }
+  })
+
+  it('falls back to the grid with a non-modal notice when the camera permission is denied', async () => {
+    /*
+     * Aceptación de W4-FE-3 (SPRINTS.md:229; DESIGN.md:251): con el permiso
+     * denegado, la venta se completa igual desde la grilla — el aviso es no
+     * modal y el segmento regresa solo a Productos.
+     */
+    const getUserMedia = vi.fn(async () => {
+      throw new DOMException('NotAllowedError', 'NotAllowedError')
+    })
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+
+    try {
+      render(
+        <CounterSaleScreen database={database} getUserMedia={asGetUserMedia(getUserMedia)} />,
+      )
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Escáner' }))
+
+      const notice = await screen.findByTestId('scanner-notice')
+
+      expect(notice.getAttribute('role')).toBe('status')
+      expect(notice.textContent).toContain('Permiso de cámara denegado')
+      expect(screen.queryByTestId('scanner-viewport')).toBeNull()
+      // La grilla quedó a la vista y la venta se completa igual.
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pan francés, S/ 0.30' }))
+
+      expect(
+        await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' }),
+      ).toBeTruthy()
+    } finally {
+      database.close()
+    }
+  })
+
+  it('falls back to the grid with a non-modal notice when the camera is unavailable', async () => {
+    const getUserMedia = vi.fn(async () => {
+      throw new DOMException('NotFoundError', 'NotFoundError')
+    })
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+
+    try {
+      render(
+        <CounterSaleScreen database={database} getUserMedia={asGetUserMedia(getUserMedia)} />,
+      )
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Escáner' }))
+
+      const notice = await screen.findByTestId('scanner-notice')
+
+      expect(notice.textContent).toContain('La cámara no está disponible')
+      expect(screen.queryByTestId('scanner-viewport')).toBeNull()
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+    } finally {
+      database.close()
+    }
+  })
+
+  it('adds the decoded camera code to the cart through the same identified path', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
+
+    const { stream } = fakeStream()
+    const getUserMedia = vi.fn(async () => stream)
+
+    let frames = 0
+    const detector: BarcodeDetectorLike = {
+      detect: async () => {
+        frames += 1
+
+        return frames === 1 ? [{ rawValue: '7591234567890' }] : []
+      },
+    }
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+
+    try {
+      render(
+        <CounterSaleScreen
+          database={database}
+          getUserMedia={asGetUserMedia(getUserMedia)}
+          createBarcodeDetector={async () => detector}
+        />,
+      )
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Escáner' }))
+
+      // El código escaneado entra por el MISMO camino que la grilla: una línea
+      // del carrito con el congelado de W4-FE-1, no una vía paralela.
+      expect(
+        await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' }),
+      ).toBeTruthy()
+      expect(await database.cart.count()).toBe(1)
+    } finally {
       database.close()
     }
   })

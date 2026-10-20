@@ -9,7 +9,14 @@ import { submitSaleClose, buildSaleClosePayload, type SaleCloseOutcome } from '@
 import type { TenderMethod } from '@/sales/tenderMethods'
 import { getPosDatabase, type PosDatabase } from '@/db/posDatabase'
 import { formatCentsToSoles } from '@/lib/money'
+import { cn } from '@/lib/utils'
 import { TENDER_LABELS } from '@/sales/tenderMethods'
+import { addIdentifiedLine } from '@/cart/identifiedLine'
+import {
+  ProductScanner,
+  type BarcodeDetectorFactory,
+  type ScannerFailure,
+} from '@/scanner/ProductScanner'
 import { ProductCatalogScreen } from '@/screens/ProductCatalogScreen'
 
 /**
@@ -33,6 +40,10 @@ export interface CounterSaleScreenProps {
   readonly token?: string
   /** Inyectable para las pruebas; en producción es el `fetch` del navegador. */
   readonly fetchImpl?: typeof fetch
+  /** Inyectable para las pruebas; en producción, `navigator.mediaDevices`. */
+  readonly getUserMedia?: typeof navigator.mediaDevices.getUserMedia
+  /** Inyectable para las pruebas; en producción, el `BarcodeDetector` nativo. */
+  readonly createBarcodeDetector?: BarcodeDetectorFactory
 }
 
 type FlowView = 'sale' | 'checkout' | 'closed'
@@ -54,12 +65,28 @@ function methodLabelOf(
     : `${label}: cobro exacto de ${formatCentsToSoles(receivedCents)}.`
 }
 
+/**
+ * Aviso no modal por cada fallo de cámara (§251-252): la venta nunca queda
+ * bloqueada por el escáner y la verdad es específica del motivo.
+ */
+const SCANNER_FAILURE_NOTICES: Record<ScannerFailure, string> = {
+  denied: 'Permiso de cámara denegado. La venta sigue desde la grilla.',
+  unavailable: 'La cámara no está disponible. La venta sigue desde la grilla.',
+  failed: 'La cámara falló. La venta sigue desde la grilla.',
+}
+
 export function CounterSaleScreen({
   database = getPosDatabase(),
   token,
   fetchImpl,
+  getUserMedia,
+  createBarcodeDetector,
 }: CounterSaleScreenProps) {
   const [view, setView] = useState<FlowView>('sale')
+  // §1.2:134 — Productos (grilla) es la vista por defecto; la cámara es el
+  // segmento best-effort que el cajero abre a pedido.
+  const [segment, setSegment] = useState<'productos' | 'escáner'>('productos')
+  const [scannerNotice, setScannerNotice] = useState<string | null>(null)
   const [delivery, setDelivery] = useState<SaleCloseOutcome | 'not-sent' | undefined>(undefined)
   const [closedSale, setClosedSale] = useState<{
     readonly method: TenderMethod
@@ -69,6 +96,17 @@ export function CounterSaleScreen({
   const lines = useCartLines(database)
   const payable = payableCartLines(lines)
   const total = cartTotalCents(payable)
+
+  /** Fallback no bloqueante: el detalle del motivo y regreso a la grilla. */
+  function handleScannerFailure(reason: ScannerFailure): void {
+    setSegment('productos')
+    setScannerNotice(SCANNER_FAILURE_NOTICES[reason])
+  }
+
+  /** La cámara comparte el camino de la grilla: mismo agregado, mismo debounce. */
+  function identifyByScan(code: string): void {
+    void addIdentifiedLine(code, database)
+  }
 
   async function confirmSale(method: TenderMethod, receivedCents: number): Promise<void> {
     // El payload congela las líneas tal cual; se PLANEA antes de vaciar el
@@ -157,7 +195,64 @@ export function CounterSaleScreen({
         </p>
       </div>
 
-      <ProductCatalogScreen database={database} />
+      {/*
+       * Aviso no modal del fallo de cámara (§251-252): vive arriba del
+       * segmento, no interrumpe ni bloquea, y desaparece al reabrir la cámara.
+       */}
+      {scannerNotice !== null ? (
+        <p
+          className="rounded-2xl border border-surface-border bg-zinc-100 p-3 text-body-sm text-text-primary"
+          data-testid="scanner-notice"
+          role="status"
+        >
+          {scannerNotice}
+        </p>
+      ) : null}
+
+      {/* Control de segmentos (§1.2:133): grilla por defecto, escáner a pedido. */}
+      <div
+        aria-label="Vista de venta"
+        className="flex gap-1 rounded-2xl border border-surface-border bg-surface-card p-1"
+        role="group"
+      >
+        {(
+          [
+            { label: 'Productos', value: 'productos' },
+            { label: 'Escáner', value: 'escáner' },
+          ] as const
+        ).map(({ label, value }) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={segment === value}
+            data-testid={`segment-${value === 'escáner' ? 'escaner' : value}`}
+            onClick={() => {
+              setSegment(value)
+              setScannerNotice(null)
+            }}
+            className={cn(
+              'min-h-12 flex-1 rounded-xl px-3 text-body-md font-semibold',
+              segment === value
+                ? 'border border-accent-hover bg-accent-primary/10 text-text-primary'
+                : 'border border-transparent text-text-secondary hover:bg-zinc-100',
+              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {segment === 'escáner' ? (
+        <ProductScanner
+          createBarcodeDetector={createBarcodeDetector}
+          getUserMedia={getUserMedia}
+          onProductIdentified={identifyByScan}
+          onFailure={handleScannerFailure}
+        />
+      ) : (
+        <ProductCatalogScreen database={database} />
+      )}
       <CartPanel database={database} />
 
       {/*
