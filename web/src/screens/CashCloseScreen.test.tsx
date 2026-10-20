@@ -355,6 +355,10 @@ describe('CashCloseScreen', () => {
     expect(screen.getByTestId('cash-close-expected-cash').textContent).toBe('S/ 10.00')
     expect(screen.getByTestId('cash-close-counted-cash').textContent).toBe('S/ 12.50')
     expect(screen.getByTestId('cash-close-difference-cash').textContent).toBe('+S/ 2.50')
+    // Un método sin fila guardada se lee como cero, no como «Informativo»: ese
+    // rótulo es solo del fiado, que es el único sin diferencia por diseño.
+    expect(screen.getByTestId('cash-close-expected-yape').textContent).toBe('S/ 0.00')
+    expect(screen.getByTestId('cash-close-difference-yape').textContent).toBe('S/ 0.00')
 
     database.close()
   })

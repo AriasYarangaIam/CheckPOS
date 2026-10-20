@@ -271,14 +271,17 @@ export function CashCloseScreen({
 
           <ul aria-label="Arqueo por método" className="flex flex-col gap-1">
             {CASH_CLOSE_METHODS.map((method) => {
-              const line = lines.find((entry) => entry.payment_method === method)
+              // Una fila guardada que no traiga el método se lee como cero: el
+              // rótulo «Informativo» es solo del fiado, no de un dato faltante.
+              const line = lines.find((entry) => entry.payment_method === method) ??
+                countLine(method, 0, 0)
               const isFiado = method === 'fiado'
               const content = (
                 <RowContent
-                  expectedCents={line?.expected_cents ?? 0}
+                  expectedCents={line.expected_cents}
                   method={method}
-                  countedCents={line?.counted_cents ?? 0}
-                  differenceCents={line?.difference_cents ?? null}
+                  countedCents={line.counted_cents}
+                  differenceCents={line.difference_cents}
                 />
               )
 
