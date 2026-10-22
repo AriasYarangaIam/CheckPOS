@@ -105,6 +105,14 @@
    */
   --animate-modal-spring: modal-spring 200ms cubic-bezier(0.16, 1, 0.3, 1);
   --animate-fade-in: fade-in 150ms ease-out;
+  /*
+   * Resorte del panel lateral del menú (docs/DESIGN.md §5.2:264: «Drawer /
+   * Sheet: spring suave (salida 300ms)»). La entrada desliza desde el borde
+   * izquierdo —el panel cuelga de la izquierda— con la misma curva amortiguada
+   * de los modales; 300ms es la duración que el documento fija para el sheet y
+   * no retriggerea en ráfaga.
+   */
+  --animate-sheet-in: sheet-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
 
   @keyframes modal-spring {
     from {
@@ -123,6 +131,17 @@
     }
     to {
       opacity: 1;
+    }
+  }
+
+  @keyframes sheet-in {
+    from {
+      opacity: 0;
+      transform: translateX(-100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
     }
   }
 }
@@ -154,8 +173,26 @@
   }
 }
 
+/*
+ * Movimiento reducido del panel lateral: se conserva el fundido —ayuda a
+ * comprender el cambio de estado— y se elimina el deslizamiento, con la banda
+ * de ≤150ms que el §5.2 fija para fades.
+ */
+@keyframes sheet-in-reduced {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-modal-spring {
     animation: modal-spring-reduced 150ms ease-out;
+  }
+
+  .animate-sheet-in {
+    animation: sheet-in-reduced 150ms ease-out;
   }
 }
