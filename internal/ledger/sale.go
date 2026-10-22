@@ -86,18 +86,22 @@ type saleAckLine struct {
 	LineTotalCents int64  `json:"line_total_cents"`
 }
 
-// saleAckSale es el encabezado congelado de la venta.
+// saleAckSale es el encabezado congelado de la venta. `kind` distingue la venta de la
+// anulación, y sus dos campos de vínculo viajan solo en la anulación con `omitempty`: el
+// acuse del cierre de venta conserva EXACTAMENTE la forma que ya publicaba (§4.9).
 type saleAckSale struct {
-	SaleID        string        `json:"sale_id"`
-	SoldOn        string        `json:"sold_on"`
-	TenantID      string        `json:"tenant_id"`
-	SoldByUserID  string        `json:"sold_by_user_id"`
-	Kind          string        `json:"kind"`
-	PaymentMethod string        `json:"payment_method"`
-	TotalCents    int64         `json:"total_cents"`
-	CreatedAt     string        `json:"created_at"`
-	ReceivedAt    string        `json:"received_at"`
-	Lines         []saleAckLine `json:"lines"`
+	SaleID         string        `json:"sale_id"`
+	SoldOn         string        `json:"sold_on"`
+	TenantID       string        `json:"tenant_id"`
+	SoldByUserID   string        `json:"sold_by_user_id"`
+	Kind           string        `json:"kind"`
+	PaymentMethod  string        `json:"payment_method"`
+	TotalCents     int64         `json:"total_cents"`
+	OriginalSaleID string        `json:"original_sale_id,omitempty"`
+	OriginalSoldOn string        `json:"original_sold_on,omitempty"`
+	CreatedAt      string        `json:"created_at"`
+	ReceivedAt     string        `json:"received_at"`
+	Lines          []saleAckLine `json:"lines"`
 }
 
 // saleAckProduct es el refresco de nivel de stock proyectado de UN producto después del

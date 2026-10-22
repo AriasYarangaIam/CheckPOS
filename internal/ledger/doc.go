@@ -18,6 +18,8 @@
 // `sales` y `sale_lines`; el stock se mueve escribiendo `stock_adjustments` a través del
 // servicio de Catalog.
 //
-// Sprint 1 solo declara la frontera: el cierre de venta es Sprint 4
-// (docs/BACKEND.md §10.4).
+// Sprint 4 entregó el cierre de venta (`POST /sales`, docs/BACKEND.md §10.4) y Sprint 5 la
+// anulación (`POST /sales/{id}/void`, §10.5): una fila `kind = 'void'` nueva que espeja el
+// método y el total POSITIVO del original, enlazada por `(original_sold_on, original_sale_id)`
+// y con la reversa de stock delegada a Catalog como deltas nuevos `source = 'void'`.
 package ledger
