@@ -20,7 +20,8 @@ import (
 //
 //   - exactamente UNA fila de delta por línea de venta, con la sign inversionada —venta =
 //     qty_delta negativo—, source 'sale', y el par (sold_on, sale_id) que la FK compuesta
-//     obliga (MD-9);
+//     obliga (MD-9); la anulación es la MISMA forma con el signo opuesto y source 'void',
+//     como fila nueva, nunca como edición de la existente;
 //   - la proyección sobre `products.stock` es ADITIVA sobre SUM(qty_delta) hecha por
 //     PostgreSQL en NUMERIC exacto, y jamás toca `products.updated_at` —el catalog PATCH
 //     LWW es el único camino de esa marca (MD-11).
@@ -49,16 +50,33 @@ type SaleStockMovement struct {
 	ReceivedAt time.Time
 }
 
-// insertSaleDeltaSQL escribe el delta de una línea. La negación vive en la SQL
-// (-($3::numeric)) para no duplicar la regla en Go: sale ⇒ qty_delta negativo (§4).
+// insertSaleDeltaSQL escribe el delta de una línea. La dirección vive en la SQL —el signo
+// del factor— y no en Go: venta ⇒ qty_delta negativo, anulación ⇒ positivo (§4). El factor
+// se pasa como argumento para que las DOS direcciones compartan una sola sentencia y un
+// solo lugar donde la regla está escrita.
 const insertSaleDeltaSQL = `
 INSERT INTO stock_adjustments (id, tenant_id, product_id, qty_delta, source, sold_on, sale_id, created_at, received_at)
-VALUES ($1, $2, $3, -($4::numeric), 'sale', $5, $6, $7, $8)`
+VALUES ($1, $2, $3, ($4::numeric) * $5, $6, $7, $8, $9, $10)`
+
+// Las dos direcciones del movimiento de venta: la venta resta la cantidad vendida y la
+// anulación la devuelve. El `source` viaja con ellas porque `stock_adjustments` lo usa para
+// distinguir el origen de cada delta (§4).
+const (
+	saleStockSource = "sale"
+	voidStockSource = "void"
+
+	// saleDirection invierte la cantidad vendida; voidDirection la repone.
+	saleDirection = -1
+	voidDirection = 1
+)
 
 // projectStockSQL aplica la proyección aditiva: SUM(qty_delta) por producto —agregada por
 // PostgreSQL sobre las filas que ESTA MISMA transacción acaba de insertar, en NUMERIC
 // exacto— y no una aritmética paralela en Go. El UPDATE no menciona updated_at: una
 // proyección de cantidades no es una mutación de catálogo (§7.3, MD-11).
+//
+// Es la ÚNICA proyección del flujo de venta: la comparten el cierre y la anulación, que solo
+// se diferencian en el signo y el source de los deltas que agrega.
 const projectStockSQL = `
 UPDATE products p
 SET stock = p.stock + d.total_delta
@@ -69,14 +87,32 @@ FROM (SELECT product_id, SUM(qty_delta) AS total_delta
 WHERE p.id = d.product_id AND p.tenant_id = $1`
 
 // WriteSaleStockDeltas ejecuta el movimiento de stock de una venta sobre la transacción
-// del llamador: una fila de delta por línea y UNA proyección aditiva colectiva sobre
-// products.stock. Es el único consumidor del sale-flow de stock.
+// del llamador: una fila de delta por línea, negativa, y UNA proyección aditiva colectiva
+// sobre products.stock. Es el único consumidor del sale-flow de stock.
 func WriteSaleStockDeltas(ctx context.Context, tx postgres.TenantTx, tenantID uuid.UUID, movement SaleStockMovement) error {
+	return writeStockDeltas(ctx, tx, tenantID, movement, saleStockSource, saleDirection)
+}
+
+// WriteVoidStockDeltas ejecuta la REVERSA del movimiento de una venta: una fila de delta
+// nueva y POSITIVA por línea, con source 'void', y la misma proyección aditiva. La fila
+// original de `stock_adjustments` no se toca: el stock se mueve con una fila nueva, igual
+// que la venta original se conserva en `sales` (docs/BACKEND.md §4.10).
+//
+// El par (sold_on, sale_id) del movimiento es el de la fila de ANULACIÓN —el `SaleID` es el
+// de la compensatoria—, porque la FK compuesta apunta a esa fila y la proyección agrega por
+// ese par (MD-9).
+func WriteVoidStockDeltas(ctx context.Context, tx postgres.TenantTx, tenantID uuid.UUID, movement SaleStockMovement) error {
+	return writeStockDeltas(ctx, tx, tenantID, movement, voidStockSource, voidDirection)
+}
+
+// writeStockDeltas es el camino único del movimiento de stock por venta: escribe un delta
+// por línea con la dirección y el source pedidos, y proyecta el stock aditivamente.
+func writeStockDeltas(ctx context.Context, tx postgres.TenantTx, tenantID uuid.UUID, movement SaleStockMovement, source string, direction int) error {
 	if tenantID == uuid.Nil {
-		return fmt.Errorf("write sale stock deltas for %s: the tenant id is the nil uuid", tenantID)
+		return fmt.Errorf("write %s stock deltas for %s: the tenant id is the nil uuid", source, movement.SaleID)
 	}
 	if movement.SaleID == uuid.Nil {
-		return fmt.Errorf("write sale stock deltas: the sale id is the nil uuid")
+		return fmt.Errorf("write %s stock deltas: the sale id is the nil uuid", source)
 	}
 
 	for _, line := range movement.Lines {
@@ -85,14 +121,14 @@ func WriteSaleStockDeltas(ctx context.Context, tx postgres.TenantTx, tenantID uu
 			return fmt.Errorf("generate the delta id: %w", err)
 		}
 		if _, err := tx.Exec(ctx, insertSaleDeltaSQL,
-			id, tenantID, line.ProductID, line.Qty, movement.SoldOn, movement.SaleID,
+			id, tenantID, line.ProductID, line.Qty, direction, source, movement.SoldOn, movement.SaleID,
 			movement.CloseAt, movement.ReceivedAt); err != nil {
-			return fmt.Errorf("insert the stock delta of %s: %w", line.ProductID, err)
+			return fmt.Errorf("insert the %s stock delta of %s: %w", source, line.ProductID, err)
 		}
 	}
 
 	if _, err := tx.Exec(ctx, projectStockSQL, tenantID, movement.SoldOn, movement.SaleID); err != nil {
-		return fmt.Errorf("project the sale stock: %w", err)
+		return fmt.Errorf("project the %s stock: %w", source, err)
 	}
 
 	return nil

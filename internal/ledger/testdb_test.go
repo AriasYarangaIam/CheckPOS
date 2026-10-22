@@ -227,6 +227,20 @@ func saleQueryCount(t *testing.T, tenants *postgres.TenantPool, tenantID, query 
 	return count
 }
 
+// saleQueryString corre una consulta escalar de texto por pos_app dentro del contexto del
+// tenant: la forma en que las pruebas de la anulación comparan una fila consigo misma.
+func saleQueryString(t *testing.T, tenants *postgres.TenantPool, tenantID, query string, args ...any) string {
+	t.Helper()
+
+	value := ""
+	withTenant(t, tenants, tenantID, func(tx postgres.TenantTx) {
+		if err := tx.QueryRow(context.Background(), query, args...).Scan(&value); err != nil {
+			t.Fatalf("leer con %q: %v", query, err)
+		}
+	})
+	return value
+}
+
 // seedTenant siembra una fila de `tenants` como dueño, sin contexto de tenant: el registro
 // vive fuera del RLS de tenant (docs/DATABASE.md §3).
 func seedTenant(t *testing.T, db *testDatabase, tenantID string) {
