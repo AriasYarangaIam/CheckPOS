@@ -44,6 +44,7 @@ import (
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/cashclose"
 	"github.com/AriasYarangaIam/CheckPOS/internal/catalog"
+	"github.com/AriasYarangaIam/CheckPOS/internal/fiado"
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
 	"github.com/AriasYarangaIam/CheckPOS/internal/ledger"
 	"github.com/AriasYarangaIam/CheckPOS/internal/photos"
@@ -51,6 +52,7 @@ import (
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/logging"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/postgres"
+	"github.com/AriasYarangaIam/CheckPOS/internal/synccursor"
 )
 
 // shutdownTimeout es lo que se espera a las peticiones en vuelo antes de cerrar. Es
@@ -250,6 +252,19 @@ func run() error {
 		return err
 	}
 
+	// El pull por cursor (Sprint 6, W6-BE-3) compone las dos lecturas mutables del
+	// dispositivo —`products` por Catalog y `fiado_accounts` por Fiado— sobre el MISMO pool
+	// de negocio: el cursor solo transporta ediciones de catálogo y registro de deudores,
+	// nunca dinero ni stock (docs/DATABASE.md §7.3, docs/BACKEND.md §4.8).
+	syncCursor, err := synccursor.NewCursorHandler(
+		catalog.NewPostgresProductStore(postgres.NewTenantPool(pool)),
+		fiado.NewPostgresAccountStore(postgres.NewTenantPool(pool)),
+		logger,
+	)
+	if err != nil {
+		return err
+	}
+
 	// El almacenamiento de objetos de las fotos (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3):
 	// el store local es la caja fuerte del contrato y el handler NO toca la base —la URL
 	// que devuelve es la única pieza que el cliente mandará después en photo_url.
@@ -287,6 +302,10 @@ func run() error {
 			// El cierre de caja: proyección del ledger por método y conteo del operador
 			// (§4.13), con el duplicado de fecha como no-op silencioso (§6.9).
 			mux.Handle("POST /cash-closes", identity.RequireAccessToken(issuer, cashCloses))
+			// El pull incremental del dispositivo: catálogo y cuentas con `updated_at`
+			// posterior al cursor, tombstones incluidos, y un cursor que avanza solo al
+			// máximo realmente entregado (docs/BACKEND.md §4.8; docs/DATABASE.md §7.3).
+			mux.Handle("GET /sync/cursor", identity.RequireAccessToken(issuer, syncCursor))
 			// El upload de fotos: multipart, 200 con la URL pública del objeto y NINGÚN byte
 			// en la base (docs/BACKEND.md §10.3).
 			mux.Handle("POST /photos", identity.RequireAccessToken(issuer, photosHandler))
