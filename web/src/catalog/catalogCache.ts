@@ -1,4 +1,5 @@
 import { getPosDatabase, type PosDatabase, type ProductRow } from '@/db/posDatabase'
+import { boundedCatalogRows, MAX_LOCAL_PRODUCTS } from '@/db/quota'
 
 /**
  * Cache local del subconjunto del catálogo del tenant (SPRINTS.md W3-FE-3;
@@ -144,7 +145,31 @@ export async function syncCatalogFromApi(input: SyncCatalogInput): Promise<Produ
   // hasta que ese camino sea del dispositivo, el cache no destruye.
   const database = input.database ?? getPosDatabase()
 
-  await database.products.bulkPut(projection)
+  // El subconjunto local está ACOTADO (W6-FE-1): se escribe a lo sumo el techo y, si el
+  // cache ya venía más grande, se recorta lo sobrante por id —el orden estable de la
+  // tienda—. Un catálogo anómalo no puede llenar el dispositivo.
+  const bounded = [...boundedCatalogRows(projection)]
+  await database.products.bulkPut(bounded)
+  await trimCatalogToBound(database)
 
-  return projection
+  return bounded
+}
+
+/**
+ * Recorta la tabla local al techo del subconjunto (W6-FE-1). Devuelve cuántas filas
+ * eliminó. El `limit` es inyectable para que la prueba fije el borde sin escribir dos mil
+ * filas.
+ */
+export async function trimCatalogToBound(
+  database: PosDatabase = getPosDatabase(),
+  limit: number = MAX_LOCAL_PRODUCTS,
+): Promise<number> {
+  const count = await database.products.count()
+  if (count <= limit) return 0
+
+  const overflow = await database.products.orderBy(':id').offset(limit).toArray()
+  const ids = overflow.map((row) => row.id)
+  await database.products.bulkDelete(ids)
+
+  return ids.length
 }
