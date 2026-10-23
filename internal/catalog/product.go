@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/postgres"
+	"github.com/AriasYarangaIam/CheckPOS/internal/synckey"
 )
 
 // Este archivo implementa la mitad de datos de /products (W3-BE-1): la fila de `products`
@@ -97,7 +98,11 @@ type ProductMutation struct {
 // servidor y la entrega el llamador: el store no lee el reloj.
 type ProductStore interface {
 	List(ctx context.Context, tenantID uuid.UUID, filter ProductFilter) ([]Product, error)
-	Create(ctx context.Context, tenantID uuid.UUID, mutation ProductMutation, receivedAt time.Time) (Product, error)
+	// Create reclama la clave de idempotencia, escribe la fila y completa el claim dentro
+	// de UNA transacción, y devuelve la fila creada junto con el snapshot JSON de la
+	// respuesta: en una repetición no hay fila nueva y el snapshot es el almacenado
+	// (docs/DATABASE.md §7.1).
+	Create(ctx context.Context, tenantID uuid.UUID, mutation ProductMutation, receivedAt time.Time, claim synckey.ClaimInput) (Product, []byte, error)
 	Update(ctx context.Context, tenantID, productID uuid.UUID, mutation ProductMutation, receivedAt time.Time) (Product, error)
 }
 
@@ -138,6 +143,14 @@ const selectProductSQL = `SELECT ` + productColumns + ` FROM products WHERE id =
 const insertProductSQL = `INSERT INTO products (id, tenant_id, name, gtin, price_cents, uom,
 	photo_url, attributes, global_product_id, created_at, updated_at, received_at)
 	VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $10, $11)`
+
+// El intento de creación vive en su propio SAVEPOINT porque una violación única aborta la
+// transacción entera: el rollback parcial deja la transacción del claim usable para leer la
+// fila ganadora y para el reintento con el nombre renombrado (§7.7, F20/F27).
+const (
+	productCreateSavepointSQL = `SAVEPOINT catalog_product_create`
+	productCreateRollbackSQL  = `ROLLBACK TO SAVEPOINT catalog_product_create`
+)
 
 // errNoRowsAffected es el resultado de un UPDATE que no tocó NINGUNA fila: o el id de la
 // ruta desapareció del tenant entre la lectura y la escritura, o otra mutación ganó la
@@ -229,14 +242,78 @@ func (s *PostgresProductStore) List(ctx context.Context, tenantID uuid.UUID, fil
 // El id lo inventó el cliente: una fila de OTRO tenant hace chocar la clave primaria
 // GLOBAL (no es una colisión de negocio, no hay nada que resolver en silencio) y es 422;
 // contra una fila PROPIA la creación es naturalmente idempotente y devuelve esa fila.
-func (s *PostgresProductStore) Create(ctx context.Context, tenantID uuid.UUID, mutation ProductMutation, receivedAt time.Time) (Product, error) {
+func (s *PostgresProductStore) Create(ctx context.Context, tenantID uuid.UUID, mutation ProductMutation, receivedAt time.Time, claim synckey.ClaimInput) (Product, []byte, error) {
 	if err := guardWrite(tenantID, &mutation); err != nil {
-		return Product{}, err
+		return Product{}, nil, err
+	}
+	if err := guardClaim(claim); err != nil {
+		return Product{}, nil, err
 	}
 
-	// Cada intento corre en una transacción NUEVA: la violación única aborta la anterior, y
-	// pgx no permite volver a escribir sobre ella. Los cuatro candidatos de nombre y el
-	// NULL del gtin acotan el proceso en 8 intentos.
+	var (
+		product  Product
+		snapshot []byte
+	)
+	// UNA sola transacción: el claim, la fila del producto y el snapshot nacen o mueren
+	// juntos (MD-4, docs/DATABASE.md §7.1). Los reintentos de las resoluciones silenciosas
+	// de §7.7 corren sobre SAVEPOINTs de ESTA transacción y no sobre transacciones nuevas:
+	// una transacción nueva perdería el claim y con él la garantía de que un duplicado
+	// concurrente no abre una segunda fila.
+	err := s.tenants.WithTenant(ctx, tenantID, func(ctx context.Context, tx postgres.TenantTx) error {
+		// Branch B ANTES de la escritura: la fila de `idempotency_keys` ES el claim y se
+		// gana INSERTANDO sobre la UNIQUE (tenant_id, key) — jamás SELECT-then-INSERT
+		// (§7.1). Las ramas A y C las resuelve el propio Claim.
+		claimed, err := synckey.Claim(ctx, tx, tenantID, claim.Key, claim.PayloadHash, receivedAt)
+		if err != nil {
+			return err
+		}
+		if claimed.Replay != nil {
+			// Branch A, repetición verdadera: la respuesta es el snapshot ALMACENADO tal
+			// cual, sin correr NINGÚN camino de negocio (§7.1).
+			snapshot = claimed.Replay
+			return nil
+		}
+
+		created, err := insertResolvingCollisions(ctx, tx, tenantID, mutation, receivedAt)
+		if err != nil {
+			return err
+		}
+
+		body, err := json.Marshal(toBody(created))
+		if err != nil {
+			return fmt.Errorf("marshal the created product: %w", err)
+		}
+		if err := synckey.Complete(ctx, tx, claimed.ID, body); err != nil {
+			return err
+		}
+
+		product, snapshot = created, body
+		return nil
+	})
+	if err != nil {
+		return Product{}, nil, err
+	}
+
+	return product, snapshot, nil
+}
+
+// insertResolvingCollisions crea la fila con las DOS resoluciones silenciosas de §7.7,
+// dentro de la transacción del claim:
+//
+//   - F20 — (tenant_id, name) choca → nombre renombrado con una derivación determinística
+//     del id de la PROPIA fila (`nombre (019a…a1b2c3d4)`), extendiendo el sufijo mientras
+//     siga chocando; reenviar la MISMA fila reproduce exactamente el mismo nombre;
+//   - F27 — (tenant_id, gtin) choca → GTIN va a NULL y la fila sobrevive sin código,
+//     re-barcodeable a mano después (§7.7).
+//
+// El id lo inventó el cliente: una fila de OTRO tenant hace chocar la clave primaria
+// GLOBAL (no es una colisión de negocio, no hay nada que resolver en silencio) y es 422;
+// contra una fila PROPIA la creación es naturalmente idempotente y devuelve esa fila. Ese
+// caso no puede leerse dentro de la transacción abortada por la UNIQUE, así que el intento
+// vive en un SAVEPOINT: el rollback parcial deja la transacción usable y la fila ganadora
+// se lee por el RLS del mismo tenant.
+func insertResolvingCollisions(ctx context.Context, tx postgres.TenantTx, tenantID uuid.UUID, mutation ProductMutation, receivedAt time.Time) (Product, error) {
+	// Los cuatro candidatos de nombre y el NULL del gtin acotan el proceso en 8 intentos.
 	renameStep := 0
 	dropGTIN := false
 	for attempt := 0; attempt < 8; attempt++ {
@@ -245,19 +322,30 @@ func (s *PostgresProductStore) Create(ctx context.Context, tenantID uuid.UUID, m
 			return Product{}, errNameCollisionStuck
 		}
 
-		violation, insertErr := s.tryInsert(ctx, tenantID, mutation, name, gtinToStore(mutation.GTIN, dropGTIN), receivedAt)
-		switch {
-		case insertErr != nil:
+		if _, err := tx.Exec(ctx, productCreateSavepointSQL); err != nil {
+			return Product{}, fmt.Errorf("open the product creation savepoint: %w", err)
+		}
+
+		_, insertErr := tx.Exec(ctx, insertProductSQL,
+			mutation.ID, tenantID, name, gtinToStore(mutation.GTIN, dropGTIN),
+			*mutation.PriceCents, *mutation.UoM, mutation.PhotoURL,
+			attributesToStore(mutation.Attributes), mutation.GlobalProductID,
+			mutation.UpdatedAt, receivedAt)
+		if insertErr == nil {
+			return readProductInTx(ctx, tx, mutation.ID)
+		}
+
+		var violation insertViolation
+		if !violationFrom(insertErr, &violation) {
 			return Product{}, insertErr
+		}
+		if _, err := tx.Exec(ctx, productCreateRollbackSQL); err != nil {
+			return Product{}, fmt.Errorf("return to the product creation savepoint: %w", err)
+		}
 
-		case violation == nil:
-			// La fila quedó escrita.
-
-		case isConstraint(violation, "products_pkey"):
-			// La clave primaria es global: o este tenant reenvió el id —y el resultado es la
-			// MISMA fila, la idempotencia natural de un dispositivo cuya respuesta no
-			// llegó— o otro tenant lo usó, que es un cuerpo inservible.
-			product, found, err := s.readProduct(ctx, tenantID, mutation.ID)
+		switch {
+		case isConstraint(&violation, "products_pkey"):
+			product, found, err := readProductInTxFound(ctx, tx, mutation.ID)
 			if err != nil {
 				return Product{}, err
 			}
@@ -266,23 +354,24 @@ func (s *PostgresProductStore) Create(ctx context.Context, tenantID uuid.UUID, m
 			}
 			return Product{}, ErrDuplicateProductID
 
-		case isConstraint(violation, "products_tenant_name_key"):
+		case isConstraint(&violation, "products_tenant_name_key"):
 			renameStep++
-			continue
 
-		case isConstraint(violation, "products_tenant_gtin_key"):
-			// F27: nadie inventa un GTIN nuevo; la fila queda sin código.
+		case isConstraint(&violation, "products_tenant_gtin_key"):
 			dropGTIN = true
-			continue
 
 		default:
-			return Product{}, violationAsError(violation)
+			return Product{}, violationAsError(&violation)
 		}
-
-		break
 	}
 
-	product, found, err := s.readProduct(ctx, tenantID, mutation.ID)
+	return Product{}, errNameCollisionStuck
+}
+
+// readProductInTx lee la fila recién creada dentro de la transacción del claim: la fila
+// tiene que ser visible por el RLS del tenant que la escribió.
+func readProductInTx(ctx context.Context, tx postgres.TenantTx, productID uuid.UUID) (Product, error) {
+	product, found, err := readProductInTxFound(ctx, tx, productID)
 	if err != nil {
 		return Product{}, err
 	}
@@ -292,27 +381,18 @@ func (s *PostgresProductStore) Create(ctx context.Context, tenantID uuid.UUID, m
 	return product, nil
 }
 
-// tryInsert realiza UN intento de creación y traduce una violación única a un error tipado
-// para que el bucle exterior decida. La transacción la cierra el helper (WithTenant), que
-// revierte el intento si la inserción choca. Un error que NO es una violación única sube
-// tal cual: el bucle no lo reintenta.
-func (s *PostgresProductStore) tryInsert(ctx context.Context, tenantID uuid.UUID, mutation ProductMutation, name string, gtin *string, receivedAt time.Time) (*insertViolation, error) {
-	err := s.tenants.WithTenant(ctx, tenantID, func(ctx context.Context, tx postgres.TenantTx) error {
-		_, err := tx.Exec(ctx, insertProductSQL,
-			mutation.ID, tenantID, name, gtin, *mutation.PriceCents, *mutation.UoM,
-			mutation.PhotoURL, attributesToStore(mutation.Attributes), mutation.GlobalProductID,
-			mutation.UpdatedAt, receivedAt)
-		return err
-	})
-	if err == nil {
-		return nil, nil
+// readProductInTxFound es la lectura de una fila por id dentro de la transacción del
+// llamador, con el `found` explícito que distingue «no existe» de «no es de este tenant».
+func readProductInTxFound(ctx context.Context, tx postgres.TenantTx, productID uuid.UUID) (Product, bool, error) {
+	scanned, err := scanOneProduct(tx.QueryRow(ctx, selectProductSQL, productID))
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return Product{}, false, nil
+	case err != nil:
+		return Product{}, false, fmt.Errorf("read the product: %w", err)
+	default:
+		return *scanned, true, nil
 	}
-
-	var violation insertViolation
-	if violationFrom(err, &violation) {
-		return &violation, nil
-	}
-	return nil, err
 }
 
 // isConstraint dice si la violación guardada es sobre la constante buscada.
@@ -530,6 +610,18 @@ func (s *PostgresProductStore) readProduct(ctx context.Context, tenantID, produc
 // guardWrite valida las precondiciones de escritura antes de abrir la primera
 // transacción: son defectos de programación del llamador, no peticiones erróneas (patrón
 // de internal/identity/device.go). El handler ya validó el cuerpo: esto cierra el tipo.
+// guardClaim valida la pareja del claim antes de abrir la transacción: sin clave del
+// cliente o sin hash del payload no hay claim que ganar, y la petición es inservible.
+func guardClaim(claim synckey.ClaimInput) error {
+	switch {
+	case claim.Key == "":
+		return errors.New("the product creation requires the client idempotency key")
+	case claim.PayloadHash == "":
+		return errors.New("the product creation requires the payload hash of the claim")
+	}
+	return nil
+}
+
 func guardWrite(tenantID uuid.UUID, mutation *ProductMutation) error {
 	if tenantID == uuid.Nil {
 		return errors.New("the product write needs the tenant id")

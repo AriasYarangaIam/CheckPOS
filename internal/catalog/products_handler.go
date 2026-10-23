@@ -1,8 +1,10 @@
 package catalog
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
+	"github.com/AriasYarangaIam/CheckPOS/internal/synckey"
 )
 
 // Este archivo implementa la superficie HTTP de /products (W3-BE-1, docs/BACKEND.md
@@ -232,8 +235,25 @@ type updateProductRequest struct {
 // La fila resuelta del store es la respuesta: una colisión de §7.7 vuelve en 200 con
 // el nombre renombrado o el gtin en NULL, en silencio.
 func (h *ProductsHandler) create(w http.ResponseWriter, r *http.Request, claims identity.Claims) {
+	// El claim es OBLIGATORIO en un POST encolable (§7.6): sin encabezado la petición es
+	// inservible y no se escribe nada, ni siquiera la fila del claim.
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" {
+		httpx.WriteError(w, validationForField(
+			"the product creation requires the Idempotency-Key header", "Idempotency-Key"))
+		return
+	}
+
+	// El hash del claim corre sobre el cuerpo RAW: los mismos bytes que el cliente envió,
+	// no una re-serialización del struct (docs/BACKEND.md §6.2).
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpx.WriteError(w, httpx.Validation("the body must be a JSON object with the product fields of §4.6", nil))
+		return
+	}
+
 	var request createProductRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&request); err != nil {
 		httpx.WriteError(w, httpx.Validation("the body must be a JSON object with the product fields of §4.6", nil))
 		return
 	}
@@ -270,8 +290,31 @@ func (h *ProductsHandler) create(w http.ResponseWriter, r *http.Request, claims 
 		mutation.GlobalProductID = newFrom(globalID)
 	}
 
-	product, err := h.store.Create(r.Context(), claims.TenantID, mutation, time.Now())
+	// El store es LA transacción: reclama la clave, escribe la fila con sus resoluciones
+	// silenciosas y completa el claim con el snapshot de la respuesta (docs/DATABASE.md
+	// §7.1). Un cuerpo inválido nunca llegó hasta acá, así que ninguna fila del claim queda
+	// registrada para una petición que no era el contrato.
+	_, snapshot, err := h.store.Create(r.Context(), claims.TenantID, mutation, time.Now(), synckey.ClaimInput{
+		Key:         key,
+		PayloadHash: synckey.PayloadHash(key, raw),
+	})
 	switch {
+	case errors.Is(err, synckey.ErrPayloadMismatch):
+		// Branch A con hashes distintos: la misma clave hablando por otro payload es el 422
+		// del §7.1 con su código propio. Nadie escribió nada detrás del conflicto.
+		httpx.WriteError(w, &httpx.Error{
+			Status:  http.StatusUnprocessableEntity,
+			Code:    payloadMismatchCode,
+			Message: "the same idempotency key was already used with a different payload",
+			Details: map[string]string{"field": "Idempotency-Key"},
+		})
+		return
+	case errors.Is(err, synckey.ErrInFlight):
+		// Branch C: el ganador sigue en vuelo — el 409 con el Retry-After que el worker
+		// respeta antes de reintentar (§7.1, docs/BACKEND.md §8.2).
+		w.Header().Set("Retry-After", "2")
+		httpx.WriteError(w, httpx.Conflict("the same idempotency key is still in flight: retry after backoff"))
+		return
 	case errors.Is(err, ErrDuplicateProductID):
 		// Un id que el tenant no puede ver ya existe: es un cuerpo inservible (422), no una
 		// fila ajena que se confiesa (el 404 no revela el aislamiento de otro tenant).
@@ -282,11 +325,28 @@ func (h *ProductsHandler) create(w http.ResponseWriter, r *http.Request, claims 
 		return
 	}
 
-	h.logger.Info("product created",
-		"product_id", product.ID.String(),
+	h.logger.Info("product stored",
+		"idempotency_key", key,
 		"tenant_id", claims.TenantID.String(),
 	)
-	httpx.WriteJSON(w, http.StatusOK, toBody(product))
+
+	// El cuerpo de la respuesta es el snapshot: en Branch B el que el store acaba de
+	// completar en el claim y en Branch A el almacenado, byte a byte. Las dos ramas
+	// devuelven la MISMA respuesta para la MISMA clave (§7.1).
+	writeSnapshot(w, snapshot)
+}
+
+// payloadMismatchCode es el código de superficie de Branch A con hashes distintos: la
+// misma clave de idempotencia reutilizada para otro payload (§7.1). Es el MISMO código que
+// usan las demás superficies encolables (§7.6), no un vocabulario por endpoint.
+const payloadMismatchCode = "idempotency.payload_mismatch"
+
+// writeSnapshot escribe el cuerpo del contrato byte a byte, sin re-serializar: la
+// repetición de una petición tiene que devolver exactamente la respuesta almacenada.
+func writeSnapshot(w http.ResponseWriter, snapshot []byte) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(snapshot)
 }
 
 // update atiende PATCH: parcial, aditivo, LWW (§4.7). El id viene de la RUTA —un id en el
