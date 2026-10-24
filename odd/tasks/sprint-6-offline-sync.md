@@ -223,20 +223,28 @@ a mitad de la cola no pierde ninguna venta.
 
 ## Cadena de entrega
 
-Los commits se reordenaron en una cadena de PRs apilados sobre `develop` (precedente de los
-Sprints 3–5). Cada PR es una unidad de revisión y su base es el PR anterior:
+Los commits se reordenaron en una cadena de PRs apilados (precedente de los Sprints 3–5).
+Cada PR es una unidad de revisión y su base es el PR anterior, así GitHub reapunta el resto
+sobre `develop` a medida que aterrizan:
 
-1. `feat/sprint-5-cash-close-durability` → `develop` (recupera el corte FE de Sprint 5, que
-   quedó fuera de `develop` al mergearse su PR contra una base ya integrada).
-2. `feat/sprint-6-docs-plan` — plan del sprint y contrato de pruebas.
-3. `feat/sprint-6-db-maintenance` — T2/T3.
-4. `feat/sprint-6-be-sync-cursor` — T6.
-5. `feat/sprint-6-be-product-claim` — T4.
-6. `feat/sprint-6-be-reconciliation` — T5.
-7. `feat/sprint-6-fe-quota` — T7.
-8. `feat/sprint-6-fe-pwa` — T8.
-9. `feat/sprint-6-fe-sync-engine` — T9.
-10. `feat/sprint-6-docs-close` — T10.
+| PR | Rama | Base | Presupuesto |
+| --- | --- | --- | --- |
+| [#26](https://github.com/AriasYarangaIam/CheckPOS/pull/26) | `feat/sprint-5-cash-close-durability` | `develop` | 3760 (`size:exception`) |
+| [#27](https://github.com/AriasYarangaIam/CheckPOS/pull/27) | `feat/sprint-6-docs-plan` | #26 | 307 |
+| [#28](https://github.com/AriasYarangaIam/CheckPOS/pull/28) | `feat/sprint-6-db-maintenance` | #27 | 1127 (`size:exception`) |
+| [#29](https://github.com/AriasYarangaIam/CheckPOS/pull/29) | `feat/sprint-6-be-sync-cursor` | #28 | 1125 (`size:exception`) |
+| [#30](https://github.com/AriasYarangaIam/CheckPOS/pull/30) | `feat/sprint-6-be-product-claim` | #29 | 512 (`size:exception`) |
+| [#31](https://github.com/AriasYarangaIam/CheckPOS/pull/31) | `feat/sprint-6-be-reconciliation` | #30 | 48 |
+| [#32](https://github.com/AriasYarangaIam/CheckPOS/pull/32) | `feat/sprint-6-fe-quota` | #31 | 240 |
+| [#33](https://github.com/AriasYarangaIam/CheckPOS/pull/33) | `feat/sprint-6-fe-pwa` | #32 | 237 |
+| [#34](https://github.com/AriasYarangaIam/CheckPOS/pull/34) | `feat/sprint-6-fe-sync-engine` | #33 | 556 (`size:exception`) |
+| [#35](https://github.com/AriasYarangaIam/CheckPOS/pull/35) | `feat/sprint-6-docs-close` | #34 | 126 |
+
+**Hallazgo de entrega (L10).** El corte FE del Sprint 5 nunca llegó a `develop`: su PR #24 se
+mergeó contra `feat/sprint-5-be-cash-close`, que ya había aterrizado en `develop` por el PR
+#23, así que los cinco commits quedaron huérfanos. Como el Sprint 6 modifica archivos que ese
+corte introdujo (`saleQueue.ts`, `catalogCache.ts`, `CounterSaleScreen.tsx`, `vite.config.ts`),
+la cadena arranca con el PR #26 que los recupera.
 
 ## Log
 
