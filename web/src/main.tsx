@@ -10,6 +10,7 @@ import '@fontsource-variable/jetbrains-mono'
 import '@/index.css'
 
 import { App } from '@/App'
+import { registerServiceWorker } from '@/pwa/register'
 
 const container = document.getElementById('root')
 
@@ -22,3 +23,7 @@ createRoot(container).render(
     <App />
   </StrictMode>,
 )
+
+// El shell de PWA se registra después de montar la app: el service worker nunca
+// bloquea el primer render (W6-FE-2).
+registerServiceWorker()
