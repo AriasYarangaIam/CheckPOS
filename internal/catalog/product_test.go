@@ -21,6 +21,7 @@ import (
 	"github.com/AriasYarangaIam/CheckPOS/internal/catalog"
 	"github.com/AriasYarangaIam/CheckPOS/internal/identity"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
+	"github.com/AriasYarangaIam/CheckPOS/internal/synckey"
 )
 
 // testSigningSecret es la clave con la que se firman los tokens de estas pruebas. Tiene 32
@@ -66,6 +67,7 @@ type createCall struct {
 	tenantID   uuid.UUID
 	mutation   catalog.ProductMutation
 	receivedAt time.Time
+	claim      synckey.ClaimInput
 }
 
 type updateCall struct {
@@ -83,12 +85,17 @@ func (s *stubStore) List(_ context.Context, _ uuid.UUID, filter catalog.ProductF
 	return s.list, nil
 }
 
-func (s *stubStore) Create(_ context.Context, tenantID uuid.UUID, mutation catalog.ProductMutation, receivedAt time.Time) (catalog.Product, error) {
-	s.createCalls = append(s.createCalls, createCall{tenantID: tenantID, mutation: mutation, receivedAt: receivedAt})
+func (s *stubStore) Create(_ context.Context, tenantID uuid.UUID, mutation catalog.ProductMutation, receivedAt time.Time, claim synckey.ClaimInput) (catalog.Product, []byte, error) {
+	s.createCalls = append(s.createCalls, createCall{tenantID: tenantID, mutation: mutation, receivedAt: receivedAt, claim: claim})
 	if s.err != nil {
-		return catalog.Product{}, s.err
+		return catalog.Product{}, nil, s.err
 	}
-	return s.create, nil
+	// El snapshot es el cuerpo del contrato de la fila, igual que lo arma el store real.
+	body, err := json.Marshal(catalog.RowOf(s.create))
+	if err != nil {
+		return catalog.Product{}, nil, err
+	}
+	return s.create, body, nil
 }
 
 func (s *stubStore) Update(_ context.Context, tenantID, id uuid.UUID, mutation catalog.ProductMutation, receivedAt time.Time) (catalog.Product, error) {
@@ -152,6 +159,13 @@ func doCatalogRequest(t *testing.T, router http.Handler, method, target, token, 
 	}
 	request := httptest.NewRequest(method, target, reader)
 	request.Header.Set("Content-Type", "application/json")
+	if method == http.MethodPost && target == "/products" {
+		if _, provided := headers["Idempotency-Key"]; !provided {
+			// Un POST encolable lleva su clave de claim (§7.6); la prueba que NO la quiere
+			// la fija explícitamente en el mapa.
+			request.Header.Set("Idempotency-Key", uuid.NewString())
+		}
+	}
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -772,9 +786,9 @@ func TestProductsPatchRejectsARemovalAttempt(t *testing.T) {
 // patch que lo traiga es 422, aunque el valor sea nulo o absurdo.
 func TestProductsPatchRejectsAStockField(t *testing.T) {
 	cases := map[string]string{
-		"a number":  `"stock":3`,
-		"a text":    `"stock":"algo"`,
-		"a null":    `"stock":null`,
+		"a number": `"stock":3`,
+		"a text":   `"stock":"algo"`,
+		"a null":   `"stock":null`,
 	}
 	productID := "019a0000-0000-7000-8000-0000000000b1"
 
@@ -802,14 +816,14 @@ func TestProductsPatchRejectsAStockField(t *testing.T) {
 // negativo, no objeto) es 422 de validación —quitar es distinto de mandar basura—.
 func TestProductsPatchRejectsUnusableProvidedFields(t *testing.T) {
 	cases := map[string][]string{
-		"a blank name":        {`"name":"   "`, "name"},
-		"an empty gtin":       {`"gtin":""`, "gtin"},
-		"a negative price":    {`"price_cents":-5`, "price_cents"},
-		"a float price":       {`"price_cents":15.5`, "price_cents"},
-		"a blank uom":         {`"uom":" "`, "uom"},
-		"an empty photo_url":  {`"photo_url":""`, "photo_url"},
-		"attributes as list":  {`"attributes":[1]`, "attributes"},
-		"attributes as text":  {`"attributes":"x"`, "attributes"},
+		"a blank name":         {`"name":"   "`, "name"},
+		"an empty gtin":        {`"gtin":""`, "gtin"},
+		"a negative price":     {`"price_cents":-5`, "price_cents"},
+		"a float price":        {`"price_cents":15.5`, "price_cents"},
+		"a blank uom":          {`"uom":" "`, "uom"},
+		"an empty photo_url":   {`"photo_url":""`, "photo_url"},
+		"attributes as list":   {`"attributes":[1]`, "attributes"},
+		"attributes as text":   {`"attributes":"x"`, "attributes"},
 		"a garbage updated_at": {`"updated_at":"mañana"`, "updated_at"},
 	}
 	productID := "019a0000-0000-7000-8000-0000000000b1"
@@ -936,5 +950,162 @@ func TestProductsPatchFailsClosedWhenTheStoreIsBroken(t *testing.T) {
 	}
 	if !strings.Contains(logBuf.String(), "pool") {
 		t.Errorf("la causa no llegó al registro del operador: %q", logBuf.String())
+	}
+}
+
+// Pruebas del claim de idempotencia en la superficie de creación (Sprint 6, W6-BE-1;
+// docs/DATABASE.md §7.1, §7.6; docs/BACKEND.md §6.1). `POST /products` es uno de los seis
+// POST encolables, así que lleva la clave del cliente y responde con el snapshot: la
+// repetición y la creación fresca devuelven la MISMA respuesta para la MISMA clave.
+
+// postProductWithoutDefault envía el POST con EXACTAMENTE las cabeceras indicadas: es la
+// única forma de probar la ausencia de la clave, que el helper general completa por defecto.
+func postProductWithoutDefault(t *testing.T, router http.Handler, token, body string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequest(http.MethodPost, "/products", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+// decodeErrorEnvelope lee el sobre de error único y lo devuelve con su código y detalles.
+func decodeErrorEnvelope(t *testing.T, recorder *httptest.ResponseRecorder) (string, map[string]string) {
+	t.Helper()
+
+	var envelope struct {
+		Error struct {
+			Code    string            `json:"code"`
+			Details map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("la respuesta no es el sobre de error: %v (%q)", err, recorder.Body.String())
+	}
+	return envelope.Error.Code, envelope.Error.Details
+}
+
+// TestProductCreateRequiresTheIdempotencyKey: sin la clave del cliente no hay claim que
+// ganar, así que la petición es 422 con el campo nombrado y el store NO corre.
+func TestProductCreateRequiresTheIdempotencyKey(t *testing.T) {
+	store := &stubStore{}
+	router, issuer := newCatalogRouter(t, store, &strings.Builder{})
+
+	recorder := postProductWithoutDefault(t, router, productToken(t, issuer), validCreateBody, nil)
+
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("estado = %d, want 422 (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	code, details := decodeErrorEnvelope(t, recorder)
+	if code != httpx.CodeValidationError {
+		t.Errorf("code = %q, want %q", code, httpx.CodeValidationError)
+	}
+	if details["field"] != "Idempotency-Key" {
+		t.Errorf("details.field = %q, want Idempotency-Key", details["field"])
+	}
+	if len(store.createCalls) != 0 {
+		t.Errorf("el store corrió sin clave de claim: %v", store.createCalls)
+	}
+}
+
+// TestProductCreateClaimsTheRawBodyAndAnswersWithTheSnapshot: el claim viaja con la clave
+// del encabezado y el hash del cuerpo RAW, y la respuesta es el snapshot del store byte a
+// byte —no una re-serialización del handler—.
+func TestProductCreateClaimsTheRawBodyAndAnswersWithTheSnapshot(t *testing.T) {
+	store := &stubStore{create: catalog.Product{
+		ID:         uuid.MustParse("019a0000-0000-7000-8000-0000000000b1"),
+		TenantID:   uuid.MustParse(tokenTenantID),
+		Name:       "arroz especial 1kg",
+		PriceCents: 1550,
+		UoM:        "kg",
+		Stock:      "0.000",
+		CreatedAt:  time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:  time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC),
+		ReceivedAt: time.Date(2026, 10, 18, 12, 0, 1, 0, time.UTC),
+	}}
+	router, issuer := newCatalogRouter(t, store, &strings.Builder{})
+
+	recorder := postProductWithoutDefault(t, router, productToken(t, issuer), validCreateBody,
+		map[string]string{"Idempotency-Key": "clave-producto-1"})
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("estado = %d, want 200 (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	if len(store.createCalls) != 1 {
+		t.Fatalf("llamadas al store = %d, want 1", len(store.createCalls))
+	}
+	claim := store.createCalls[0].claim
+	if claim.Key != "clave-producto-1" {
+		t.Errorf("claim.Key = %q, want la clave del encabezado", claim.Key)
+	}
+	if want := synckey.PayloadHash("clave-producto-1", []byte(validCreateBody)); claim.PayloadHash != want {
+		t.Errorf("claim.PayloadHash = %q, want el hash del cuerpo RAW %q", claim.PayloadHash, want)
+	}
+	var row map[string]json.RawMessage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &row); err != nil {
+		t.Fatalf("el snapshot no es una fila de producto: %v (%q)", err, recorder.Body.String())
+	}
+	if len(row) != 13 {
+		t.Errorf("el snapshot trae %d columnas, want las 13 de §4: %v", len(row), row)
+	}
+}
+
+// TestProductCreateAnswersTheClaimBranches: la clave reutilizada con otro payload es el 422
+// con el código propio del claim, y el duplicado en vuelo es el 409 con Retry-After.
+func TestProductCreateAnswersTheClaimBranches(t *testing.T) {
+	cases := []struct {
+		name        string
+		storeErr    error
+		wantStatus  int
+		wantCode    string
+		wantField   string
+		wantBackoff bool
+	}{
+		{
+			name:       "payload mismatch",
+			storeErr:   synckey.ErrPayloadMismatch,
+			wantStatus: http.StatusUnprocessableEntity,
+			wantCode:   "idempotency.payload_mismatch",
+			wantField:  "Idempotency-Key",
+		},
+		{
+			name:        "in flight",
+			storeErr:    synckey.ErrInFlight,
+			wantStatus:  http.StatusConflict,
+			wantCode:    httpx.CodeConflict,
+			wantBackoff: true,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			store := &stubStore{err: testCase.storeErr}
+			router, issuer := newCatalogRouter(t, store, &strings.Builder{})
+
+			recorder := postProductWithoutDefault(t, router, productToken(t, issuer), validCreateBody,
+				map[string]string{"Idempotency-Key": "clave-producto-2"})
+
+			if recorder.Code != testCase.wantStatus {
+				t.Fatalf("estado = %d, want %d (cuerpo %q)", recorder.Code, testCase.wantStatus, recorder.Body.String())
+			}
+			code, details := decodeErrorEnvelope(t, recorder)
+			if code != testCase.wantCode {
+				t.Errorf("code = %q, want %q", code, testCase.wantCode)
+			}
+			if testCase.wantField != "" && details["field"] != testCase.wantField {
+				t.Errorf("details.field = %q, want %q", details["field"], testCase.wantField)
+			}
+			if testCase.wantBackoff && recorder.Header().Get("Retry-After") == "" {
+				t.Error("sin Retry-After: el worker no tiene backoff que respetar (§7.1 Branch C)")
+			}
+		})
 	}
 }
