@@ -177,4 +177,60 @@ describe('App shell', () => {
       await clearDeviceSession()
     }
   })
+
+  it('never offers the navigation menu before the device PIN unlocks', () => {
+    render(<App />)
+
+    // El menú es de la operación, no del acceso: la pantalla de PIN sigue
+    // siendo la puerta y no hay panel que abrir antes de desbloquear.
+    expect(screen.queryByTestId('open-navigation')).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('opens the navigation sheet and switches the surface to the cash close and back', async () => {
+    /*
+     * W5-FE-3: el botón del menú vive en la cabecera y el panel lista los
+     * destinos. De los seis, solo dos tienen superficie: Punto de Venta y
+     * Gestión de Caja y Turnos. El shell cambia de superficie sin recargar.
+     */
+    const validUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+
+    await saveDeviceSession({
+      deviceId: 'device-nav-app-test',
+      userId: 'user-nav-app-test',
+      validUntil,
+      pin: '2468',
+    })
+
+    try {
+      render(<App />)
+      await waitForNumpad()
+
+      for (const digit of '2468') {
+        fireEvent.click(screen.getByRole('button', { name: digit }))
+      }
+
+      await screen.findByText('Punto de venta')
+
+      fireEvent.click(screen.getByTestId('open-navigation'))
+
+      const sheet = await screen.findByRole('dialog')
+
+      expect(within(sheet).getAllByTestId(/^nav-destination-/)).toHaveLength(6)
+
+      fireEvent.click(screen.getByTestId('nav-destination-cash-close'))
+
+      expect(await screen.findByRole('heading', { name: 'Cierre de caja' })).toBeTruthy()
+      // El panel se cerró al navegar.
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+      fireEvent.click(screen.getByTestId('open-navigation'))
+      await screen.findByRole('dialog')
+      fireEvent.click(screen.getByTestId('nav-destination-sale'))
+
+      expect(await screen.findByRole('heading', { name: 'Punto de venta' })).toBeTruthy()
+    } finally {
+      await clearDeviceSession()
+    }
+  })
 })
