@@ -10,6 +10,7 @@ import { submitSaleClose, buildSaleClosePayload, type SaleCloseOutcome } from '@
 import { enqueueSaleClose, markSaleQueueStatus } from '@/sales/saleQueue'
 import type { TenderMethod } from '@/sales/tenderMethods'
 import { getPosDatabase, type PosDatabase } from '@/db/posDatabase'
+import { StorageQuotaBlockedError } from '@/db/quota'
 import { formatCentsToSoles } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { addIdentifiedLine } from '@/cart/identifiedLine'
@@ -138,9 +139,14 @@ export function CounterSaleScreen({
      */
     try {
       await enqueueSaleClose(payload, key, database)
-    } catch {
+    } catch (error) {
+      // El bloqueo por cuota nombra su motivo (W6-FE-1): el cajero sabe que el problema es
+      // el espacio del dispositivo y no la venta. Cualquier otro fallo conserva el aviso
+      // genérico, que ya dice que el cobro sigue abierto.
       setCloseFailure(
-        'La venta no se guardó en el dispositivo. El cobro sigue abierto; intenta de nuevo.',
+        error instanceof StorageQuotaBlockedError
+          ? error.reason
+          : 'La venta no se guardó en el dispositivo. El cobro sigue abierto; intenta de nuevo.',
       )
       setView('sale')
 

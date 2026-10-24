@@ -686,4 +686,41 @@ describe('CounterSaleScreen sale durability', () => {
       database.close()
     }
   })
+  it('blocks the sale with its reason when the device runs out of storage', async () => {
+    /*
+     * W6-FE-1: al agotarse la cuota, la venta se bloquea con su motivo visible —
+     * «no hay espacio»— y no con el aviso genérico. El carrito queda intacto, así
+     * que el cobro se puede reintentar después de liberar espacio.
+     */
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+    const transaction = vi
+      .spyOn(database, 'transaction')
+      .mockRejectedValue(new DOMException('lleno', 'QuotaExceededError') as never)
+
+    try {
+      render(<CounterSaleScreen database={database} token="token-de-la-sesion" />)
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pan francés, S/ 0.30' }))
+      expect(
+        await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' }),
+      ).toBeTruthy()
+      fireEvent.click(screen.getByTestId('cobrar-button'))
+      fireEvent.click(screen.getByTestId('tender-method-yape'))
+      fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+
+      const notice = await screen.findByTestId('close-failure-notice')
+
+      expect(notice.getAttribute('role')).toBe('alert')
+      expect(notice.textContent).toContain('No hay espacio en el dispositivo')
+      expect(notice.textContent).toContain('El cobro sigue abierto')
+      expect(screen.queryByTestId('sale-closed-summary')).toBeNull()
+      expect(await database.idempotency_queue.count()).toBe(0)
+      expect(await database.cart.count()).toBe(1)
+    } finally {
+      transaction.mockRestore()
+      database.close()
+    }
+  })
 })
