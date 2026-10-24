@@ -1,5 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 
+import type { TenderMethod } from '@/sales/tenderMethods'
+
 /**
  * Esquema de la base local (docs/FRONTEND.md TASK 2.1). Guarda tres cosas y
  * solo tres: la proyección local del catálogo del tenant, el carrito en curso y
@@ -68,7 +70,24 @@ export interface CartRow {
  */
 export type QueueStatus = 'pending' | 'in_flight' | 'completed' | 'failed'
 
-/** Evento pendiente de sincronizar, con la clave de idempotencia que lo cubre. */
+/**
+ * Qué evento guarda la fila. La cola nació en el Sprint 1 sin consumidor; el
+ * Sprint 5 la usa para la venta cerrada y el cierre de caja, y el contrato ya
+ * tiene el camino de la anulación (`POST /sales/{id}/void`, sin superficie de
+ * UI todavía).
+ */
+export type QueueOperation = 'sale' | 'void' | 'cash_close'
+
+/**
+ * Evento pendiente de sincronizar, con la clave de idempotencia que lo cubre.
+ *
+ * Las columnas de proyección (`business_date`, `payment_method`,
+ * `total_cents`) son copias CONGELADAS del cuerpo serializado, no un segundo
+ * cálculo: el arqueo agrupa por método y fecha de negocio lo que el evento ya
+ * cerró, sin volver a mirar las líneas (`docs/DATABASE.md` §2.3; SPRINTS.md
+ * W5-FE-2). `last_error` conserva el código del servidor que dejó la fila en
+ * `failed`; es informativo y nunca reemplaza al estado.
+ */
 export interface IdempotencyQueueRow {
   readonly id: string
   /** Clave `(tenant_id, key)` de la operación; la unicidad la fija el servidor. */
@@ -78,6 +97,17 @@ export interface IdempotencyQueueRow {
   readonly status: QueueStatus
   /** Marca de tiempo ISO 8601 del encolado. */
   readonly created_at: string
+  readonly operation: QueueOperation
+  /** Fecha de negocio LOCAL congelada por el evento (`YYYY-MM-DD`). */
+  readonly business_date: string
+  /** Venta del evento: la del cierre o la que la anulación compensa. */
+  readonly sale_id: string | null
+  /** Método de pago congelado; el arqueo agrupa por este campo. */
+  readonly payment_method: TenderMethod | null
+  /** Total congelado en centavos enteros; nunca se recomputa de las líneas. */
+  readonly total_cents: number
+  /** Código del último error del servidor, si la fila quedó en `failed`. */
+  readonly last_error: string | null
 }
 
 /**
@@ -109,6 +139,31 @@ export interface DeviceSessionRow {
   readonly pin_verifier: string
 }
 
+/**
+ * Cierre de caja local de UNA fecha de negocio (W5-FE-2; docs/DESIGN.md
+ * §194-198; decisión F37 del sprint). Es lo que vuelve el arqueo de una fecha
+ * ya cerrada de **solo lectura**: reabrir la pantalla muestra el cierre
+ * guardado, no un formulario editable.
+ *
+ * La clave primaria es `closed_on` y no `id`: el contrato tiene UN cierre por
+ * fecha de negocio y tenant (`UNIQUE (tenant_id, closed_on)`), así que la misma
+ * regla se impone acá sin una segunda consulta. `counts` guarda el desglose
+ * serializado de los seis métodos —la proyección local primero y el congelado
+ * del servidor cuando el acuse llega—; `acknowledged` es la única diferencia
+ * entre un cierre que el servidor confirmó y uno que solo existe en el
+ * dispositivo.
+ */
+export interface CashCloseRow {
+  /** `cash_closes.id` del servidor, o el id que el cliente propuso al cerrar. */
+  readonly id: string
+  /** Fecha de negocio LOCAL (`YYYY-MM-DD`); es también la clave primaria. */
+  readonly closed_on: string
+  readonly created_at: string
+  /** `CashCloseCountLine[]` serializado, en el orden fijo de los seis métodos. */
+  readonly counts: string
+  readonly acknowledged: boolean
+}
+
 /** Nombre por defecto de la base. */
 export const POS_DATABASE_NAME = 'pos-saas'
 
@@ -118,6 +173,7 @@ export class PosDatabase extends Dexie {
   cart!: Table<CartRow, string>
   idempotency_queue!: Table<IdempotencyQueueRow, string>
   device_session!: Table<DeviceSessionRow, string>
+  cash_closes!: Table<CashCloseRow, string>
 
   constructor(name: string = POS_DATABASE_NAME) {
     super(name)
@@ -156,6 +212,26 @@ export class PosDatabase extends Dexie {
       cart: 'id, product_id',
       idempotency_queue: 'id, key, status, created_at',
       device_session: 'id',
+    })
+
+    /*
+     * Versión 3 (W5-FE-2): una sola tienda nueva, el cierre de caja local.
+     *
+     * La clave primaria es `closed_on` porque el contrato tiene UN cierre por
+     * fecha de negocio y tenant (`docs/DATABASE.md` §4 `cash_closes`, D10): la
+     * misma regla queda impuesta por el esquema local. `id` se declara como
+     * índice solo para poder rastrear un cierre acusado desde su fila.
+     *
+     * Las cuatro tiendas anteriores se repiten **idénticas**, con la misma
+     * convención de las versiones 1 y 2: el esquema completo se lee en cada
+     * versión aunque Dexie herede lo que no se repite.
+     */
+    this.version(3).stores({
+      products: 'id, gtin, name, category',
+      cart: 'id, product_id',
+      idempotency_queue: 'id, key, status, created_at',
+      device_session: 'id',
+      cash_closes: 'closed_on, id',
     })
   }
 }

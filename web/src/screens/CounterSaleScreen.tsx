@@ -4,9 +4,10 @@ import { CheckoutScreen } from '@/screens/CheckoutScreen'
 import { CartPanel } from '@/components/CartPanel'
 import { SaleTicket } from '@/components/SaleTicket'
 import { Button } from '@/components/ui/Button'
-import { cartTotalCents, emptyCart, payableCartLines } from '@/cart/cartStore'
+import { cartTotalCents, payableCartLines } from '@/cart/cartStore'
 import { useCartLines } from '@/hooks/useCartLines'
 import { submitSaleClose, buildSaleClosePayload, type SaleCloseOutcome } from '@/sales/saleClose'
+import { enqueueSaleClose, markSaleQueueStatus } from '@/sales/saleQueue'
 import type { TenderMethod } from '@/sales/tenderMethods'
 import { getPosDatabase, type PosDatabase } from '@/db/posDatabase'
 import { formatCentsToSoles } from '@/lib/money'
@@ -24,10 +25,11 @@ import { ProductCatalogScreen } from '@/screens/ProductCatalogScreen'
  * Es la superficie donde viven la grilla de productos, el carrito y el cobro.
  *
  * **La red no está en el camino crítico del cobro** (ARCHITECTURE.md:98):
- * `Finalizar venta` arma el payload congelado, cierra con la venta
- * localmente (carrito vaciado) y el POST sale DESPUÉS con su
- * `Idempotency-Key`. El acuse no dicta si la venta existe: solo se dice en
- * pantalla su estado real.
+ * `Finalizar venta` arma el payload congelado, **persiste el evento en la cola
+ * local y vacía el carrito en una sola transacción**, y recién entonces el POST
+ * sale con su `Idempotency-Key` (W5-FE-1). El acuse no dicta si la venta existe:
+ * solo se dice en pantalla su estado real, y la cola conserva lo que quedó sin
+ * confirmar para el badge de la cabecera.
  *
  * Sin token disponibles (el desbloqueo por PIN no restaura sesión en línea)
  * el POST no se dispara: el estado honesto de la entrega queda «sin
@@ -60,6 +62,27 @@ const SCANNER_FAILURE_NOTICES: Record<ScannerFailure, string> = {
   failed: 'La cámara falló. La venta sigue desde la grilla.',
 }
 
+/**
+ * Mapa honesto del resultado del envío sobre la fila de la cola (W5-FE-1).
+ * `unconfirmed` no toca la fila: la venta sigue `pending` y el badge la cuenta
+ * hasta que el envío se pueda confirmar (el motor de sync es de la Semana 6).
+ */
+async function recordSaleOutcome(
+  key: string,
+  outcome: SaleCloseOutcome,
+  database: PosDatabase,
+): Promise<void> {
+  if (outcome.status === 'acknowledged') {
+    await markSaleQueueStatus(key, 'completed', undefined, database)
+
+    return
+  }
+
+  if (outcome.status === 'rejected' || outcome.status === 'mismatch') {
+    await markSaleQueueStatus(key, 'failed', outcome.error.code, database)
+  }
+}
+
 export function CounterSaleScreen({
   database = getPosDatabase(),
   token,
@@ -73,6 +96,10 @@ export function CounterSaleScreen({
   // segmento best-effort que el cajero abre a pedido.
   const [segment, setSegment] = useState<'productos' | 'escáner'>('productos')
   const [scannerNotice, setScannerNotice] = useState<string | null>(null)
+  // Aviso de la venta que NO se pudo persistir: sin evento local no hay cierre
+  // que sobreviva a un crash, así que la pantalla dice la verdad y deja el
+  // carrito intacto para reintentar.
+  const [closeFailure, setCloseFailure] = useState<string | null>(null)
   const [delivery, setDelivery] = useState<SaleCloseOutcome | 'not-sent' | undefined>(undefined)
   const [closedSale, setClosedSale] = useState<{
     readonly method: TenderMethod
@@ -96,13 +123,34 @@ export function CounterSaleScreen({
   }
 
   async function confirmSale(method: TenderMethod, receivedCents: number): Promise<void> {
-    // El payload congela las líneas tal cual; se PLANEA antes de vaciar el
-    // carrito para que el cierre y el POST sean de la misma venta.
+    // El payload congela las líneas tal cual; se PLANEA antes de tocar la cola
+    // y el carrito para que el evento y el envío sean de la misma venta.
     const payload = buildSaleClosePayload(payable, { paymentMethod: method })
+    // La misma clave cubre el evento local y el claim del servidor: reintentar
+    // el envío jamás abre una segunda venta.
+    const key = crypto.randomUUID()
+
+    /*
+     * La escritura va PRIMERO y es atómica (W5-FE-1): fila `pending` +
+     * carrito vacío en una transacción. Matar la pestaña entre las dos
+     * escrituras no puede perder el evento, y si la escritura falla el carrito
+     * sigue ahí — el cobro no se pierde, se reintenta.
+     */
+    try {
+      await enqueueSaleClose(payload, key, database)
+    } catch {
+      setCloseFailure(
+        'La venta no se guardó en el dispositivo. El cobro sigue abierto; intenta de nuevo.',
+      )
+      setView('sale')
+
+      return
+    }
 
     // Cierre local: es el hecho que el cajero ve, no el acuse remoto. El
     // número de operación del ticket es el sale_id del payload congelado, el
     // mismo que el servidor reclama — válido también sin conexión.
+    setCloseFailure(null)
     setClosedSale({
       method,
       receivedCents,
@@ -111,14 +159,20 @@ export function CounterSaleScreen({
     })
     setDelivery(token === undefined ? 'not-sent' : undefined)
     setView('closed')
-    await emptyCart(database)
 
     if (token === undefined) return
 
     // El largo del POST no interrumpe nada: la pantalla ya está en el estado
     // cerrado y el acuse llega cuando llega.
-    void submitSaleClose({ token, payload, fetchImpl })
-      .then((outcome) => setDelivery(outcome))
+    void submitSaleClose({ token, payload, fetchImpl, key })
+      .then((outcome) => {
+        setDelivery(outcome)
+        // El resultado se mapea sobre la fila: acuse → `completed`, rechazo o
+        // desajuste → `failed` con el código; sin acuse la fila sigue
+        // `pending`, que es lo que el badge cuenta. Un fallo de este mapa no
+        // cambia la verdad que el ticket ya mostró.
+        void recordSaleOutcome(key, outcome, database)
+      })
       .catch(() => setDelivery({ status: 'unconfirmed' }))
   }
 
@@ -170,6 +224,16 @@ export function CounterSaleScreen({
           Un toque en la grilla agrega la línea; el carrito queda guardado en el dispositivo
         </p>
       </div>
+
+      {closeFailure === null ? null : (
+        <p
+          className="rounded-2xl border border-danger-action bg-surface-card p-3 text-body-sm text-text-primary"
+          data-testid="close-failure-notice"
+          role="alert"
+        >
+          {closeFailure}
+        </p>
+      )}
 
       {/*
        * Aviso no modal del fallo de cámara (§251-252): vive arriba del

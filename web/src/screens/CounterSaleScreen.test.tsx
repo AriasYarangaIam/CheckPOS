@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { syncCatalogFromApi } from '@/catalog/catalogCache'
 import { resetIdentifiedTapMemory } from '@/cart/identifiedLine'
 import { POS_DATABASE_NAME, PosDatabase, type ProductRow } from '@/db/posDatabase'
+import { PendingSyncBadge } from '@/components/PendingSyncBadge'
 import type { BarcodeDetectorLike } from '@/scanner/ProductScanner'
 import { CounterSaleScreen } from '@/screens/CounterSaleScreen'
 
@@ -433,6 +434,255 @@ describe('CounterSaleScreen', () => {
     } finally {
       vi.restoreAllMocks()
 
+      database.close()
+    }
+  })
+})
+
+/*
+ * W5-FE-1: la venta cerrada se persiste ANTES del ack (SPRINTS.md:265;
+ * ARCHITECTURE.md:168). Lo que se prueba acá es el orden —fila `pending` con el
+ * carrito vacío antes de que el `fetch` exista— y el mapa honesto del resultado
+ * sobre la fila: acuse → `completed`, rechazo o desajuste → `failed`, sin acuse
+ * → sigue `pending`. Matar la pestaña a mitad de la cola no pierde la venta.
+ */
+describe('CounterSaleScreen sale durability', () => {
+  /** Grilla → carrito → cobro → cierre, con el tender y el envío del caso. */
+  async function closeSale(
+    database: PosDatabase,
+    props: { readonly token?: string; readonly fetchImpl?: typeof fetch },
+  ): Promise<void> {
+    await database.products.bulkAdd(PRODUCTS)
+    render(<CounterSaleScreen database={database} {...props} />)
+
+    await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pan francés, S/ 0.30' }))
+    expect(
+      await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' }),
+    ).toBeTruthy()
+    fireEvent.click(screen.getByTestId('cobrar-button'))
+    fireEvent.click(screen.getByTestId('tender-method-yape'))
+    fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+    await screen.findByTestId('sale-closed-summary')
+  }
+
+  it('writes the pending event and empties the cart before the POST is issued', async () => {
+    const database = freshDatabase()
+    let atFetch: { readonly statuses: readonly string[]; readonly cartLines: number } | undefined
+
+    const fetchImpl = vi.fn(async () => {
+      // Lo que la base tiene EN EL INSTANTE del POST: es la prueba de orden.
+      atFetch = {
+        statuses: (await database.idempotency_queue.toArray()).map((row) => row.status),
+        cartLines: await database.cart.count(),
+      }
+
+      throw new TypeError('red caída')
+    })
+
+    try {
+      await closeSale(database, {
+        token: 'token-de-la-sesion',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      })
+
+      await waitFor(() => expect(fetchImpl).toHaveBeenCalled())
+
+      expect(atFetch).toEqual({ statuses: ['pending'], cartLines: 0 })
+    } finally {
+      database.close()
+    }
+  })
+
+  it('keeps the event pending when the network never answered', async () => {
+    const database = freshDatabase()
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('red caída')
+    })
+
+    try {
+      await closeSale(database, {
+        token: 'token-de-la-sesion',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      })
+
+      await waitFor(() =>
+        expect(screen.getByTestId('sale-delivery-status').textContent).toContain(
+          'no quedó confirmado',
+        ),
+      )
+
+      const [row] = await database.idempotency_queue.toArray()
+
+      // Sin acuse la venta ya está cerrada: la fila sigue esperando, no falla.
+      expect(row?.status).toBe('pending')
+      expect(row?.last_error).toBeNull()
+      expect(await database.cart.count()).toBe(0)
+    } finally {
+      database.close()
+    }
+  })
+
+  it('flips the event to completed when the server acknowledges', async () => {
+    const database = freshDatabase()
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ sale: { sale_id: 'ajeno' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    )
+
+    try {
+      await closeSale(database, {
+        token: 'token-de-la-sesion',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      })
+
+      await waitFor(async () =>
+        expect((await database.idempotency_queue.toArray())[0]?.status).toBe('completed'),
+      )
+
+      const [row] = await database.idempotency_queue.toArray()
+
+      expect(row?.last_error).toBeNull()
+      expect(row?.operation).toBe('sale')
+      expect(row?.total_cents).toBe(30)
+    } finally {
+      database.close()
+    }
+  })
+
+  it('marks the event failed with the server code when the body is rejected', async () => {
+    const database = freshDatabase()
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: 'validation_failed', message: 'El cuerpo no es válido' } }),
+          { status: 422, headers: { 'content-type': 'application/json' } },
+        ),
+    )
+
+    try {
+      await closeSale(database, {
+        token: 'token-de-la-sesion',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      })
+
+      await waitFor(async () =>
+        expect((await database.idempotency_queue.toArray())[0]?.status).toBe('failed'),
+      )
+
+      // El código del servidor queda como evidencia del reintento imposible; la
+      // venta siguió cerrada localmente y el ticket lo dice.
+      expect((await database.idempotency_queue.toArray())[0]?.last_error).toBe('validation_failed')
+      expect(screen.getByTestId('sale-delivery-status').textContent).toContain('validation_failed')
+    } finally {
+      database.close()
+    }
+  })
+
+  it('marks the event failed when the same key travelled with another body', async () => {
+    const database = freshDatabase()
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: { code: 'idempotency.payload_mismatch', message: 'La clave ya existe con otro cuerpo' },
+          }),
+          { status: 422, headers: { 'content-type': 'application/json' } },
+        ),
+    )
+
+    try {
+      await closeSale(database, {
+        token: 'token-de-la-sesion',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      })
+
+      await waitFor(async () =>
+        expect((await database.idempotency_queue.toArray())[0]?.status).toBe('failed'),
+      )
+      expect((await database.idempotency_queue.toArray())[0]?.last_error).toBe(
+        'idempotency.payload_mismatch',
+      )
+    } finally {
+      database.close()
+    }
+  })
+
+  it('shows the pending count after a kill and a fresh mount', async () => {
+    /*
+     * Prueba de durabilidad: la venta cierra sin red, la conexión se suelta
+     * (`close`) y una instancia nueva —otra pestaña, la PWA reiniciada— lee la
+     * cola desde IndexedDB y la cuenta. Nada de esto vive en memoria del
+     * proceso que murió.
+     */
+    const database = freshDatabase()
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('red caída')
+    })
+
+    try {
+      await closeSale(database, {
+        token: 'token-de-la-sesion',
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      })
+      await waitFor(() => expect(fetchImpl).toHaveBeenCalled())
+
+      const name = database.name
+
+      database.close()
+
+      const reopened = new PosDatabase(name)
+
+      try {
+        render(<PendingSyncBadge database={reopened} />)
+
+        expect(await screen.findByText('1 venta por sincronizar')).toBeTruthy()
+      } finally {
+        reopened.close()
+      }
+    } finally {
+      database.close()
+    }
+  })
+
+  it('says the sale is still open when the event cannot be persisted', async () => {
+    /*
+     * Si IndexedDB no puede escribir, la transacción revierte el carrito y la
+     * fila: la venta NO se cierra en pantalla, porque una venta cerrada sin
+     * evento se perdería al matar la pestaña —justo lo que la unidad prohíbe—.
+     */
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+    const transaction = vi
+      .spyOn(database, 'transaction')
+      .mockRejectedValue(new Error('disco lleno') as never)
+
+    try {
+      render(<CounterSaleScreen database={database} token="token-de-la-sesion" />)
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: 'Pan francés, S/ 0.30' }))
+      expect(
+        await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' }),
+      ).toBeTruthy()
+      fireEvent.click(screen.getByTestId('cobrar-button'))
+      fireEvent.click(screen.getByTestId('tender-method-yape'))
+      fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+
+      const notice = await screen.findByTestId('close-failure-notice')
+
+      expect(notice.getAttribute('role')).toBe('alert')
+      expect(notice.textContent).toContain('no se guardó')
+      expect(screen.queryByTestId('sale-closed-summary')).toBeNull()
+      expect(await database.idempotency_queue.count()).toBe(0)
+      // El carrito sigue con su línea: el cobro no se perdió, se puede reintentar.
+      expect(await database.cart.count()).toBe(1)
+    } finally {
+      transaction.mockRestore()
       database.close()
     }
   })
