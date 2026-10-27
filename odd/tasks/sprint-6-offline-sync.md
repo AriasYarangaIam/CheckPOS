@@ -246,6 +246,29 @@ mergeó contra `feat/sprint-5-be-cash-close`, que ya había aterrizado en `devel
 corte introdujo (`saleQueue.ts`, `catalogCache.ts`, `CounterSaleScreen.tsx`, `vite.config.ts`),
 la cadena arranca con el PR #26 que los recupera.
 
+### Entrega efectiva (corregida el 2026-10-27)
+
+La tabla anterior registra la cadena **intentada**, no la que aterrizó. Cada PR tomó como base el
+anterior y la raíz (#27) apuntó a `feat/sprint-5-cash-close-durability` en vez de `develop`: GitHub no
+tenía a dónde reapuntar, así que los once commits quedaron huérfanos y `develop` siguió en el Sprint 5
+mientras los nueve PRs figuraban como mergeados. El PR #36 (`develop` → `main`, 2026-10-24) por eso
+llevó solo seis commits del Sprint 5.
+
+Re-entrega anclada en `develop`, con los mismos commits rebasados y árbol idéntico (`git diff` entre
+el tip viejo y el reconstruido = 0 líneas):
+
+| PR | Rama | Base | Presupuesto |
+| --- | --- | --- | --- |
+| [#37](https://github.com/AriasYarangaIam/CheckPOS/pull/37) | `feat/sprint-6-01-docs-plan` | `develop` | 307 |
+| [#38](https://github.com/AriasYarangaIam/CheckPOS/pull/38) | `feat/sprint-6-02-db-maintenance` | #37 | 1127 (`size:exception`) |
+| [#39](https://github.com/AriasYarangaIam/CheckPOS/pull/39) | `feat/sprint-6-03-be-sync-cursor` | #38 | 1125 (`size:exception`) |
+| [#40](https://github.com/AriasYarangaIam/CheckPOS/pull/40) | `feat/sprint-6-04-be-product-claim` | #39 | 512 (`size:exception`) |
+| [#41](https://github.com/AriasYarangaIam/CheckPOS/pull/41) | `feat/sprint-6-05-be-reconciliation` | #40 | 48 |
+| [#42](https://github.com/AriasYarangaIam/CheckPOS/pull/42) | `feat/sprint-6-06-fe-quota` | #41 | 240 |
+| [#43](https://github.com/AriasYarangaIam/CheckPOS/pull/43) | `feat/sprint-6-07-fe-pwa` | #42 | 237 |
+| [#44](https://github.com/AriasYarangaIam/CheckPOS/pull/44) | `feat/sprint-6-08-fe-sync-engine` | #43 | 556 (`size:exception`) |
+| [#45](https://github.com/AriasYarangaIam/CheckPOS/pull/45) | `feat/sprint-6-09-docs-close` | #44 | este documento |
+
 ## Log
 
 - **L1** (solicitud del usuario, verbatim): «Ahora ejecuta los planes indicados para el Sprint 6»
@@ -281,3 +304,14 @@ la cadena arranca con el PR #26 que los recupera.
   `Idempotency-Key` (422 sin ella), como los otros tres POST encolables ya existentes. Es la lectura
   de §7.6 y §6.1 para el único POST encolable que quedaba sin claim; las pruebas de la superficie
   anterior se actualizaron con la cabecera y la rama sin cabecera quedó fijada por prueba propia.
+- **L11** (corrección de entrega, medida el 2026-10-27): la cadena original nunca llegó a `develop`.
+  Medido en el remoto: `origin/develop` estaba en `301174e` (PR #26), le faltaban los **11 commits y
+  4.178 líneas** del Sprint 6, y el PR #36 (`develop` → `main`) había llevado solo seis commits del
+  Sprint 5. Causa: la raíz de la cadena (#27) apuntaba a `feat/sprint-5-cash-close-durability` y no a
+  `develop`, así que el reapuntado automático que este documento daba por hecho no tenía destino —el
+  mismo fallo que L10, un nivel más arriba—. Corrección: los once commits se rebasaron sobre `develop`
+  (`git rebase --onto 301174e 078422d`, sin conflictos, porque `develop` y `078422d` tienen el mismo
+  árbol) y se reabrieron como la pila #37-#45 anclada en `develop`. Verificación del rebase: `git diff`
+  entre el tip viejo y el reconstruido da **0 líneas**; `vitest run` 343/343. Los seis paquetes Go con
+  PostgreSQL no se pudieron re-ejecutar en esa sesión porque Docker estaba apagado: los 98 fallos son
+  `dial tcp 127.0.0.1:5433`, ninguna causa de código.
