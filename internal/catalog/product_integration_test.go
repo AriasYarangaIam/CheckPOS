@@ -623,3 +623,51 @@ func TestProductCreateRejectsTheSameKeyWithAnotherBody(t *testing.T) {
 		t.Errorf("filas = %d, want 1: el conflicto de payload no escribe nada", rows)
 	}
 }
+
+// TestProductCreateResolvesTheCollisionUnderTheClaimAndReplaysIt: la violación única de
+// nombre (F20) se resuelve del lado del servidor —200 con la fila renombrada, el POS no
+// recibe ningún error— y la repetición de la MISMA clave devuelve esa fila resuelta, no un
+// segundo renombrado: el renombrado es determinístico (docs/DATABASE.md §7.7, §7.9).
+func TestProductCreateResolvesTheCollisionUnderTheClaimAndReplaysIt(t *testing.T) {
+	router, issuer, tenants, _ := freshIntegrationCase(t)
+	token := productToken(t, issuer)
+
+	// La primera fila se queda con el nombre; la segunda choca contra la UNIQUE de nombre.
+	first := doCatalogRequest(t, router, http.MethodPost, "/products", token, validCreateBody,
+		map[string]string{"Idempotency-Key": "clave-colision-1"})
+	if first.Code != http.StatusOK {
+		t.Fatalf("primera creación: estado = %d, want 200 (cuerpo %q)", first.Code, first.Body.String())
+	}
+
+	collidingBody := strings.Replace(validCreateBody,
+		`"id":"019a0000-0000-7000-8000-0000000000b1"`,
+		`"id":"019a0000-0000-7000-8000-0000000000c2"`, 1)
+	headers := map[string]string{"Idempotency-Key": "clave-colision-2"}
+
+	resolved := doCatalogRequest(t, router, http.MethodPost, "/products", token, collidingBody, headers)
+	if resolved.Code != http.StatusOK {
+		t.Fatalf("colisión de nombre: estado = %d, want 200 — el POS nunca ve el conflicto (F20) (cuerpo %q)",
+			resolved.Code, resolved.Body.String())
+	}
+	renamed := decodeProductRow(t, resolved)
+	if renamed.Name == "arroz especial 1kg" {
+		t.Fatalf("name = %q, want el renombrado determinístico de F20: el nombre no puede repetirse", renamed.Name)
+	}
+	if renamed.ID != "019a0000-0000-7000-8000-0000000000c2" {
+		t.Errorf("id = %q, want el id del cliente", renamed.ID)
+	}
+
+	// La repetición de la misma clave devuelve la fila YA resuelta, no un segundo renombrado.
+	replay := doCatalogRequest(t, router, http.MethodPost, "/products", token, collidingBody, headers)
+	if replay.Code != http.StatusOK {
+		t.Fatalf("repetición de la colisión: estado = %d, want 200 (cuerpo %q)", replay.Code, replay.Body.String())
+	}
+	if replay.Body.String() != resolved.Body.String() {
+		t.Errorf("la repetición cambió la fila resuelta:\nprimera: %s\nrepetición: %s",
+			resolved.Body.String(), replay.Body.String())
+	}
+
+	if rows := queryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM products`); rows != 2 {
+		t.Errorf("filas = %d, want 2: el reintento no crea una tercera fila", rows)
+	}
+}
