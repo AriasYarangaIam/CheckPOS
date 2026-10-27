@@ -44,6 +44,13 @@ const (
 	// (docs/DATABASE.md §5.5, §5.6, §7.7).
 	DefaultPlatformDatabaseURL = "postgres://pos_platform:pos_local_dev@localhost:5433/pos?sslmode=disable"
 
+	// DefaultMaintenanceDatabaseURL es el DSN del rol de mantenimiento `pos_maintenance`:
+	// la retención de 400 días de `idempotency_keys` (Sprint 6, W6-DB-1, docs/DATABASE.md
+	// §7.2) es su único DELETE de la matriz de concesiones (§5.5). La contraseña es el
+	// valor de desarrollo local que ya existe en el repositorio; producción la rota fuera
+	// de banda.
+	DefaultMaintenanceDatabaseURL = "postgres://pos_maintenance:pos_local_dev@localhost:5433/pos?sslmode=disable"
+
 	// DefaultObjectStorageDir es el directorio del almacenamiento de objetos de las fotos
 	// (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3). Es relativo al directorio de trabajo del
 	// proceso: un almacenamiento de objetos real (SDK externo) lo pisará con su propia
@@ -238,6 +245,14 @@ func AppDatabaseURL() string {
 // negocio, y las concesiones que describa roles_and_grants.sql valen acá y nada más.
 func PlatformDatabaseURL() string {
 	return environmentOr("DATABASE_PLATFORM_URL", DefaultPlatformDatabaseURL)
+}
+
+// MaintenanceDatabaseURL devuelve el DSN del rol de mantenimiento `pos_maintenance`:
+// DATABASE_MAINTENANCE_URL si está definida, y si no el valor por defecto (W6-DB-1,
+// docs/DATABASE.md §5.5, §7.2). Su única concesión de datos es DELETE sobre
+// `idempotency_keys`; el DDL de particiones corre con el rol de migración (split F9).
+func MaintenanceDatabaseURL() string {
+	return environmentOr("DATABASE_MAINTENANCE_URL", DefaultMaintenanceDatabaseURL)
 }
 
 // ObjectStorageDir devuelve el directorio del almacenamiento de objetos de las fotos:
