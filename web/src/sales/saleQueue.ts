@@ -1,5 +1,6 @@
 import { getPosDatabase, type IdempotencyQueueRow, type PosDatabase, type QueueStatus } from '@/db/posDatabase'
 import { notifyCartChanged } from '@/cart/cartStore'
+import { isStorageQuotaError, StorageQuotaBlockedError } from '@/db/quota'
 import type { SaleClosePayload } from '@/sales/saleClose'
 
 /**
@@ -66,10 +67,19 @@ export async function enqueueSaleClose(
     last_error: null,
   }
 
-  await database.transaction('rw', database.idempotency_queue, database.cart, async () => {
-    await database.idempotency_queue.add({ ...row })
-    await database.cart.clear()
-  })
+  try {
+    await database.transaction('rw', database.idempotency_queue, database.cart, async () => {
+      await database.idempotency_queue.add({ ...row })
+      await database.cart.clear()
+    })
+  } catch (error) {
+    // La cuota agotada es la única degradación que el cajero necesita ver con un motivo
+    // propio: el cobro queda abierto y el carrito intacto (W6-FE-1). Cualquier otro fallo
+    // de escritura sube tal cual y la pantalla responde con su aviso genérico.
+    if (isStorageQuotaError(error)) throw new StorageQuotaBlockedError()
+
+    throw error
+  }
 
   notifySaleQueueChanged()
   notifyCartChanged()

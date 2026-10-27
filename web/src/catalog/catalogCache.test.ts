@@ -4,7 +4,7 @@ import 'fake-indexeddb/auto'
 import Dexie from 'dexie'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { syncCatalogFromApi, type ApiProductRow } from '@/catalog/catalogCache'
+import { syncCatalogFromApi, trimCatalogToBound, type ApiProductRow } from '@/catalog/catalogCache'
 import { POS_DATABASE_NAME, PosDatabase } from '@/db/posDatabase'
 
 /*
@@ -259,5 +259,34 @@ describe('syncCatalogFromApi', () => {
     const rows = await database.products.toArray()
 
     expect(rows.map((row) => row.id)).toEqual(['a1-uuid', 'a2-uuid', 'a3-uuid'])
+  })
+  it('trims the local subset back to its bound', async () => {
+    /*
+     * W6-FE-1: el subconjunto local está acotado. Con más filas que el techo, el cache
+     * recorta por id y devuelve cuántas eliminó: el dispositivo no puede llenarse con el
+     * catálogo.
+     */
+    const database = freshDatabase()
+    await database.products.bulkAdd(
+      Array.from({ length: 5 }, (_, index) => ({
+        id: `019a0000-0000-7000-8000-00000000000${index}`,
+        gtin: null,
+        name: `producto ${index}`,
+        price_cents: 100,
+        uom: 'unit',
+        stock: 0,
+        photo_url: null,
+        category: null,
+      })),
+    )
+
+    try {
+      const removed = await trimCatalogToBound(database, 3)
+
+      expect(removed).toBe(2)
+      expect(await database.products.count()).toBe(3)
+    } finally {
+      database.close()
+    }
   })
 })
