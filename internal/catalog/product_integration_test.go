@@ -566,3 +566,60 @@ func TestProductPatchAnswers404ForAForeignProduct(t *testing.T) {
 		t.Errorf("la fila del otro tenant quedó alterada: %+v", foreign)
 	}
 }
+
+// TestProductCreateCollapsesADuplicateToASingleRowAndTheSameSnapshot: con la MISMA clave y
+// el MISMO cuerpo, el segundo POST es una repetición verdadera del claim —200 con el
+// snapshot almacenado, byte a byte— y la tabla queda con UNA fila. Es el criterio del
+// sprint: los duplicados colapsan a un solo ack (docs/BACKEND.md §8.2, §6.1).
+func TestProductCreateCollapsesADuplicateToASingleRowAndTheSameSnapshot(t *testing.T) {
+	router, issuer, tenants, _ := freshIntegrationCase(t)
+	token := productToken(t, issuer)
+	headers := map[string]string{"Idempotency-Key": "clave-venta-offline-1"}
+
+	first := doCatalogRequest(t, router, http.MethodPost, "/products", token, validCreateBody, headers)
+	if first.Code != http.StatusOK {
+		t.Fatalf("primera creación: estado = %d, want 200 (cuerpo %q)", first.Code, first.Body.String())
+	}
+
+	second := doCatalogRequest(t, router, http.MethodPost, "/products", token, validCreateBody, headers)
+	if second.Code != http.StatusOK {
+		t.Fatalf("repetición: estado = %d, want 200 (cuerpo %q)", second.Code, second.Body.String())
+	}
+	if first.Body.String() != second.Body.String() {
+		t.Errorf("la repetición no devolvió el snapshot almacenado:\nprimera: %s\nsegunda: %s",
+			first.Body.String(), second.Body.String())
+	}
+
+	if rows := queryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM products`); rows != 1 {
+		t.Errorf("filas = %d, want 1: un duplicado no abre una segunda fila", rows)
+	}
+	if claims := queryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM idempotency_keys WHERE state = 'completed'`); claims != 1 {
+		t.Errorf("claims completados = %d, want 1", claims)
+	}
+}
+
+// TestProductCreateRejectsTheSameKeyWithAnotherBody: la misma clave con otro payload es el
+// 422 del claim, sin segunda escritura (docs/DATABASE.md §7.1 Branch A).
+func TestProductCreateRejectsTheSameKeyWithAnotherBody(t *testing.T) {
+	router, issuer, tenants, _ := freshIntegrationCase(t)
+	token := productToken(t, issuer)
+	headers := map[string]string{"Idempotency-Key": "clave-venta-offline-2"}
+
+	first := doCatalogRequest(t, router, http.MethodPost, "/products", token, validCreateBody, headers)
+	if first.Code != http.StatusOK {
+		t.Fatalf("primera creación: estado = %d, want 200 (cuerpo %q)", first.Code, first.Body.String())
+	}
+
+	otherBody := strings.Replace(validCreateBody, `"price_cents":1550`, `"price_cents":1600`, 1)
+	second := doCatalogRequest(t, router, http.MethodPost, "/products", token, otherBody, headers)
+	if second.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("misma clave, otro cuerpo: estado = %d, want 422 (cuerpo %q)", second.Code, second.Body.String())
+	}
+	if !strings.Contains(second.Body.String(), "idempotency.payload_mismatch") {
+		t.Errorf("el 422 no trae el código del claim: %s", second.Body.String())
+	}
+
+	if rows := queryCount(t, tenants, tokenTenantID, `SELECT count(*) FROM products`); rows != 1 {
+		t.Errorf("filas = %d, want 1: el conflicto de payload no escribe nada", rows)
+	}
+}
