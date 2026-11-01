@@ -9,7 +9,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { saveDeviceSession } from '@/auth/deviceSession'
-import { NavigationSheet } from '@/components/NavigationSheet'
+import { NavigationSheet, type NavigationSurface } from '@/components/NavigationSheet'
 import { POS_DATABASE_NAME, PosDatabase } from '@/db/posDatabase'
 
 /*
@@ -54,9 +54,9 @@ afterEach(async () => {
 
 interface SheetHarnessProps {
   readonly database: PosDatabase
-  readonly onNavigate?: (surface: 'sale' | 'cash-close') => void
+  readonly onNavigate?: (surface: NavigationSurface) => void
   readonly onOpenChange?: (open: boolean) => void
-  readonly activeSurface?: 'sale' | 'cash-close'
+  readonly activeSurface?: NavigationSurface
 }
 
 function renderSheet({
@@ -129,13 +129,13 @@ describe('NavigationSheet', () => {
     database.close()
   })
 
-  it('renders the four surfaces of later sprints as unavailable and never navigates', () => {
+  it('renders the three surfaces of later sprints as unavailable and never navigates', () => {
     const database = freshDatabase()
     const onNavigate = vi.fn()
 
     renderSheet({ database, onNavigate })
 
-    for (const destination of ['accounts', 'inventory', 'waste', 'attendance']) {
+    for (const destination of ['inventory', 'waste', 'attendance']) {
       const entry = screen.getByTestId(`nav-destination-${destination}`)
 
       // Declarado no disponible en lugar de navegar a una pantalla que no
@@ -148,6 +148,22 @@ describe('NavigationSheet', () => {
     }
 
     expect(onNavigate).not.toHaveBeenCalled()
+
+    database.close()
+  })
+
+  it('navigates to the debtor wallet: the fiado surface exists now', () => {
+    const database = freshDatabase()
+    const onNavigate = vi.fn()
+
+    renderSheet({ database, onNavigate })
+
+    const entry = screen.getByTestId('nav-destination-accounts')
+    expect(entry.getAttribute('aria-disabled')).toBeNull()
+    expect(entry.textContent).not.toContain('Próximamente')
+
+    fireEvent.click(entry)
+    expect(onNavigate).toHaveBeenCalledWith('accounts')
 
     database.close()
   })

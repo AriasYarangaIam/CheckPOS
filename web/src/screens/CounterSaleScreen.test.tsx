@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { syncCatalogFromApi } from '@/catalog/catalogCache'
 import { resetIdentifiedTapMemory } from '@/cart/identifiedLine'
 import { POS_DATABASE_NAME, PosDatabase, type ProductRow } from '@/db/posDatabase'
+import { accountBalanceCents } from '@/fiado/fiadoStore'
 import { PendingSyncBadge } from '@/components/PendingSyncBadge'
 import type { BarcodeDetectorLike } from '@/scanner/ProductScanner'
 import { CounterSaleScreen } from '@/screens/CounterSaleScreen'
@@ -491,6 +492,128 @@ describe('CounterSaleScreen sale durability', () => {
 
       expect(atFetch).toEqual({ statuses: ['pending'], cartLines: 0 })
     } finally {
+      database.close()
+    }
+  })
+
+  it('enqueues the fiado sale and its signed movement in the same local close', async () => {
+    /*
+     * W7-FE-2 (decisión 9 del sprint 7): una venta a fiado encola DOS eventos con
+     * claves distintas —la venta que proyecta el arqueo por D11 y el movimiento
+     * positivo que mueve la deuda— y siembra el deudor local para que la cartera
+     * muestre la deuda sin conexión. El carrito se vacía en la misma transacción.
+     */
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+    await database.fiado_accounts.add({
+      id: 'acct-rosa',
+      name: 'Rosa Quispe',
+      phone: '+51987111222',
+      created_at: '2026-10-26T12:00:00.000Z',
+      updated_at: '2026-10-26T12:00:00.000Z',
+    })
+
+    const fetchSpy = vi.fn(async () =>
+      new Response(JSON.stringify({ sale: { sale_id: '00000000-0000-0000-0000-00000000000a' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+    try {
+      render(
+        <CounterSaleScreen
+          database={database}
+          fetchImpl={fetchSpy as unknown as typeof fetch}
+          token="token-de-la-sesion"
+        />,
+      )
+
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+      fireEvent.click(screen.getByRole('button', { name: 'Pan francés, S/ 0.30' }))
+      await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' })
+
+      fireEvent.click(screen.getByTestId('cobrar-button'))
+      fireEvent.click(screen.getByTestId('tender-method-fiado'))
+
+      // Un toque para elegir al deudor de la cartera.
+      fireEvent.click(await screen.findByTestId('debtor-option-acct-rosa'))
+      fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+
+      await screen.findByTestId('sale-closed-summary')
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+
+      const queue = await database.idempotency_queue.toArray()
+      expect(queue.map((row) => row.operation).sort()).toEqual(['fiado_movement', 'sale'])
+      expect(await database.cart.count()).toBe(0)
+
+      const movement = queue.find((row) => row.operation === 'fiado_movement')
+      const movementBody = JSON.parse(movement?.payload ?? '{}') as {
+        amount_cents?: number
+        fiado_account_id?: string
+        fiado_account?: unknown
+        sale_id?: string
+        sold_on?: string
+      }
+      expect(movementBody.amount_cents).toBe(30)
+      expect(movementBody.fiado_account_id).toBe('acct-rosa')
+      // Un deudor ya conocido no reenvía su registro: el upsert no debe pisar el nombre.
+      expect(movementBody.fiado_account).toBeUndefined()
+
+      const sale = queue.find((row) => row.operation === 'sale')
+      expect(JSON.parse(sale?.payload ?? '{}').payment_method).toBe('fiado')
+      expect(movementBody.sale_id).toBe(JSON.parse(sale?.payload ?? '{}').sale_id)
+      expect(movementBody.sold_on).toBe(JSON.parse(sale?.payload ?? '{}').sold_on)
+
+      const movements = await database.fiado_movements.toArray()
+      expect(accountBalanceCents(movements)).toBe(30)
+    } finally {
+      vi.restoreAllMocks()
+      database.close()
+    }
+  })
+
+  it('registers a new debtor from the checkout and sends it inside the movement', async () => {
+    const database = freshDatabase()
+    await database.products.bulkAdd(PRODUCTS)
+
+    const fetchSpy = vi.fn(async () =>
+      new Response(JSON.stringify({ sale: { sale_id: '00000000-0000-0000-0000-00000000000b' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+    try {
+      render(<CounterSaleScreen database={database} fetchImpl={fetchSpy as unknown as typeof fetch} />)
+
+      await waitFor(() => expect(screen.getAllByTestId('product-tile')).toHaveLength(1))
+      fireEvent.click(screen.getByRole('button', { name: 'Pan francés, S/ 0.30' }))
+      await screen.findByRole('button', { name: 'Agregar una unidad de Pan francés' })
+
+      fireEvent.click(screen.getByTestId('cobrar-button'))
+      fireEvent.click(screen.getByTestId('tender-method-fiado'))
+      fireEvent.click(screen.getByTestId('debtor-new'))
+      fireEvent.change(screen.getByTestId('debtor-name'), { target: { value: 'Marta Luján' } })
+      fireEvent.click(screen.getByTestId('debtor-register'))
+      fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+
+      await screen.findByTestId('sale-closed-summary')
+
+      const movement = (await database.idempotency_queue.toArray()).find(
+        (row) => row.operation === 'fiado_movement',
+      )
+      const body = JSON.parse(movement?.payload ?? '{}') as {
+        fiado_account?: { name?: string; phone?: string | null }
+      }
+      expect(body.fiado_account?.name).toBe('Marta Luján')
+      expect(body.fiado_account?.phone).toBeNull()
+
+      // La cartera local ya conoce al deudor: la deuda se ve sin conexión.
+      const accounts = await database.fiado_accounts.toArray()
+      expect(accounts.map((account) => account.name)).toEqual(['Marta Luján'])
+    } finally {
+      vi.restoreAllMocks()
       database.close()
     }
   })
