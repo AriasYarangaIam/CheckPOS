@@ -138,3 +138,20 @@ func TestAdminPasswordPropagatesTheSetterError(t *testing.T) {
 		t.Errorf("el error perdió la causa: %v", err)
 	}
 }
+
+// TestRunDispatchesTheAdminPasswordSubcommand: el despacho del comando reconoce el subcomando y
+// falla ANTES de abrir cualquier conexión cuando el camino está incompleto. Es la única prueba del
+// cableado `run` → `runAdminPassword` que no necesita base de datos.
+func TestRunDispatchesTheAdminPasswordSubcommand(t *testing.T) {
+	err := run(context.Background(), []string{"admin-password"})
+	if err == nil {
+		t.Fatal("run admin-password sin --tenant no falló")
+	}
+	if !strings.Contains(err.Error(), "admin-password") {
+		t.Errorf("el error no nombra el subcomando: %v", err)
+	}
+
+	if err := run(context.Background(), []string{"no-existe"}); err == nil {
+		t.Fatal("run no rechazó un subcomando desconocido")
+	}
+}
