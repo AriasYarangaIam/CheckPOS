@@ -265,22 +265,37 @@ los saldos son computados en las dos capas y ninguna cuenta ni movimiento se pie
 
 ## Cadena de entrega
 
-Rama `feat/sprint-7-fiados`, anclada en `develop` (que es idéntico a `main`: el Sprint 6 aterrizó por
-los PRs #37–#45 y el #46 llevó `develop` a `main`). Los commits son unidades de revisión; **no se
-abrió ningún PR ni se empujó nada**: push, PR y merge son decisiones del usuario.
+Rama de trabajo `feat/sprint-7-fiados`, anclada en `develop` (idéntico a `main`: el Sprint 6 aterrizó
+por los PRs #37–#45 y el #46 llevó `develop` a `main`). La entrega se abrió como una **cadena de PRs
+apilados anclada en `develop`** — el patrón que funcionó en la re-entrega del Sprint 6. Cada PR es una
+unidad de revisión y su base es el PR anterior, así que GitHub reapunta el resto sobre `develop` a
+medida que aterrizan. El orden de merge es de abajo hacia arriba.
 
-| Unidad | Commit | Líneas | Contenido |
-| --- | --- | --- | --- |
-| 1 | `0898fde` | 200 | El documento del sprint con el contrato de forma congelado |
-| 2 | `c01d6cb` | 490 | El contrato de esquema fijado por prueba (W7-DB-1) |
-| 3 | `2f07cd0` | 1484 | `POST /fiado-movements`: claim, upsert atómico, saldo computado (`size:exception`) |
-| 4 | `ac846a6` | 554 | `GET /fiado-accounts`: cartera, historial y restauración (`size:exception`) |
-| 5 | `b2f19b0` | 1316 | Capa de datos del cliente: esquema v4, cola del fiado, restauración, sin WhatsApp |
-| 6 | `d4f8c52` | 1184 | Cobro a fiado en dos toques, cartera, abono parcial y navegación |
+| PR | Rama | Base | Líneas | Contenido |
+| --- | --- | --- | --- | --- |
+| [#47](https://github.com/AriasYarangaIam/CheckPOS/pull/47) | `feat/sprint-7-01-docs-plan` | `develop` | 223 | El documento del sprint con el contrato de forma congelado |
+| [#48](https://github.com/AriasYarangaIam/CheckPOS/pull/48) | `feat/sprint-7-02-db-schema` | #47 | 490 | El contrato de esquema fijado por prueba (W7-DB-1) |
+| [#49](https://github.com/AriasYarangaIam/CheckPOS/pull/49) | `feat/sprint-7-03-be-movements` | #48 | 1.484 | `POST /fiado-movements`: claim, upsert atómico, saldo computado |
+| [#50](https://github.com/AriasYarangaIam/CheckPOS/pull/50) | `feat/sprint-7-04-be-accounts` | #49 | 554 | `GET /fiado-accounts`: cartera, historial y restauración |
+| [#51](https://github.com/AriasYarangaIam/CheckPOS/pull/51) | `feat/sprint-7-05-fe-data` | #50 | 1.331 | Capa de datos del cliente: esquema v4, cola del fiado, restauración, sin WhatsApp |
+| [#52](https://github.com/AriasYarangaIam/CheckPOS/pull/52) | `feat/sprint-7-06-fe-wallet` | #51 | 1.217 | Cobro a fiado en dos toques, cartera, abono parcial y navegación |
+| [#53](https://github.com/AriasYarangaIam/CheckPOS/pull/53) | `feat/sprint-7-07-docs-close` | #52 | este documento | El cierre con su verificación y sus límites |
 
-Total: 35 archivos, 5.028 líneas agregadas. Las unidades 3 a 6 exceden el presupuesto de ~400 líneas
-por el mismo motivo que los cortes del Sprint 6 (`size:exception`): una unidad de comportamiento con
-su prueba de integración no se parte sin dejar una mitad sin cobertura.
+Total: 35 archivos, 5.028 líneas agregadas. Las unidades #48–#52 exceden el presupuesto de ~400 líneas
+de revisión por el mismo motivo que los cortes del Sprint 6: una unidad de comportamiento con su
+prueba de integración no se parte sin dejar una mitad sin cobertura. El repositorio **no tiene
+workflows de CI ni plantilla de PR** (no existe `.github/`) y no existen las etiquetas `type:*` ni
+`size:*`, así que el presupuesto se declara en el cuerpo de cada PR en lugar de en una etiqueta, y no
+hay checks requeridos esperando: las verificaciones registradas en este documento son las que corrieron
+en local con PostgreSQL arriba.
+
+**Entrega efectiva.** Los siete PRs se mergearon a `develop` con commits de merge, en orden y sin
+conflictos: `fb44edf` (#47), `205ff15` (#48), `c76ff20` (#49), `0d59778` (#50), `8edcdb1` (#51),
+`3722a41` (#52) y `8c22f36` (#53). Antes de cada merge el PR se reapuntó explícitamente a `develop`,
+en lugar de confiar en el reapuntado automático que en la primera entrega del Sprint 6 dejó la cadena
+huérfana. El árbol de `develop` resultante es idéntico al tip verificado, salvo este mismo documento,
+que entra por el PR de registro siguiente. El paso `develop` → `main` se abre como PR inmediatamente
+después de este registro.
 
 ## Log
 
@@ -293,3 +308,5 @@ su prueba de integración no se parte sin dejar una mitad sin cobertura.
 - **L7** (ajuste de interfaz encontrado por la prueba): la restauración se movió fuera del detalle del deudor. Su caso de uso es un dispositivo reinstalado, que después del login no tiene ninguna cuenta local —y por lo tanto ningún detalle donde alojar el botón—.
 - **L8** (T2 sin rojo): las pruebas de esquema pasaron en la primera corrida porque el DDL de `migrations/20261015000005_fiado.sql` y las guardas de `20261019000001` ya existían desde los Sprints 1 y 4. La entrega de W7-DB-1 es el PIN de ese contrato, no una corrección; el rojo observado en el resto de las tareas fue de compilación (la superficie nueva definida por su prueba antes de existir) y después de comportamiento en los casos de LWW, rollback y aislamiento.
 - **L9** (cambios pedidos sobre comportamiento ya fijado): cuatro pruebas existentes cambiaron porque el sprint cambia lo que fijaban —el cierre a fiado ahora exige deudor, el esquema local sube a la versión 4, la navegación habilita `Cuentas y Fiados` y la lista de tiendas declaradas crece—. Ninguna se debilitó: cada una se reescribió con la regla nueva y su caso positivo.
+- **L10** (entrega, medida el 2026-10-31): con autorización explícita del usuario para administrar los PRs, los siete commits se abrieron como la cadena apilada #47–#53 con la raíz anclada en `develop` —la condición que faltó en la primera entrega del Sprint 6—. Estado verificado en el remoto: los siete `mergeable=MERGEABLE`, bases encadenadas en orden, y `gh pr checks` sin checks reportados porque el repositorio no define workflows. Ningún PR se mergeó.
+- **L11** (entrega, medida el 2026-10-31): la cadena se mergeó a `develop` PR por PR (`#47`→`#53`), reapuntando cada uno a `develop` de forma explícita antes del merge y esperando `mergeable=MERGEABLE` en cada paso. Verificación posterior: `git diff origin/develop` contra el tip local verificado da **0 líneas de código** (la única diferencia es este documento, que entra por su propio PR de registro). Ningún PR quedó abierto.
