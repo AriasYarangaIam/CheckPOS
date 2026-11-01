@@ -92,8 +92,10 @@ describe('AdminShell', () => {
     database.close()
   })
 
-  it('closes the session on the client and returns to the selector', () => {
+  it('closes the session on the client, without calling any endpoint', () => {
     const onLogout = vi.fn()
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
 
     // Una sesión guardada al montar, para probar que el cierre la borra de verdad.
     saveAdminSession(SESSION)
@@ -107,6 +109,8 @@ describe('AdminShell', () => {
     expect(onLogout).toHaveBeenCalled()
     expect(sessionStorage.getItem(ADMIN_SESSION_KEY)).toBeNull()
     expect(readAdminSession()).toBeNull()
+    // No existe endpoint de cierre de sesión y no se inventa uno (`ARCHITECTURE.md:122-135`).
+    expect(fetchSpy).not.toHaveBeenCalled()
 
     database.close()
   })
