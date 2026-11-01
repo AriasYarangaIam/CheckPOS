@@ -2,6 +2,8 @@ import { useState } from 'react'
 
 import { ErgonomicNumpad, NUMPAD_DELETE_KEY, type NumpadKey } from '@/components/ErgonomicNumpad'
 import { Money } from '@/components/Money'
+import type { FiadoAccountRow } from '@/db/posDatabase'
+import { searchFiadoAccounts } from '@/fiado/fiadoStore'
 import { formatCentsToSoles } from '@/lib/money'
 import { TENDER_LABELS, TENDER_METHODS, type TenderMethod } from '@/sales/tenderMethods'
 import { cn } from '@/lib/utils'
@@ -16,10 +18,16 @@ import { cn } from '@/lib/utils'
  * **Vuelto.** Solo `cash` activa la calculadora de vuelto con los chips de
  * billetes rápidos y el card gigante; los otros métodos cobran el monto
  * exacto (Yape/Plin confirman recepción, tarjeta termina en la terminal) y
- * `fiado` cierra con cero recibido — el deudor se registra en Semana 7.
+ * `fiado` cierra con cero recibido.
  *
- * Esta pantalla NO envía el POST: entrega (método, recibido) al hospedador,
- * que arma el payload congelado y cierra localmente.
+ * **Deudor en dos toques.** `fiado` no cierra sin deudor: el cajero toca el
+ * método y después toca un deudor de la cartera, o lo registra escribiendo el
+ * nombre (teléfono opcional) y confirmando. Ese registro viaja con el primer
+ * movimiento, porque el contrato no tiene un `POST /fiado-accounts` (decisión 1
+ * de forma del sprint 7).
+ *
+ * Esta pantalla NO envía el POST: entrega (método, recibido, deudor) al
+ * hospedador, que arma los payloads congelados y cierra localmente.
  */
 
 /** Billetes rápidos del §2.2, en centavos enteros. */
@@ -30,18 +38,41 @@ const QUICK_BILL_CENTS: readonly { label: string; cents: number }[] = [
   { label: 'S/ 100', cents: 10000 },
 ]
 
+/**
+ * Deudor elegido para la venta a fiado. `isNew` distingue el alta —que viaja en
+ * el cuerpo del movimiento y el servidor materializa con su upsert atómico— de
+ * un deudor que ya está registrado y no necesita reenvío.
+ */
+export interface CheckoutDebtor {
+  readonly id: string
+  readonly name: string
+  readonly phone: string | null
+  readonly isNew: boolean
+}
+
 export interface CheckoutScreenProps {
   readonly lines: readonly { readonly name: string; readonly lineTotal: number }[]
   readonly totalCents: number
-  /** Se llama al finalizar: fija `sales.payment_method` y el monto recibido. */
-  readonly onConfirm: (paymentMethod: TenderMethod, receivedCents: number) => void
+  /** Se llama al finalizar: fija `sales.payment_method`, el monto recibido y, en fiado, el deudor. */
+  readonly onConfirm: (paymentMethod: TenderMethod, receivedCents: number, debtor?: CheckoutDebtor) => void
   readonly onBack?: () => void
+  /** Cartera local de deudores para elegir en un toque (W7-FE-1). */
+  readonly debtors?: readonly FiadoAccountRow[]
 }
 
-export function CheckoutScreen({ lines, totalCents, onConfirm, onBack }: CheckoutScreenProps) {
+export function CheckoutScreen({ lines, totalCents, onConfirm, onBack, debtors = [] }: CheckoutScreenProps) {
   const [method, setMethod] = useState<TenderMethod | null>(null)
   // El monto recibido se tipea en dígitos de centavos: `2500` es S/ 25.00.
   const [receivedEntry, setReceivedEntry] = useState('')
+  // Deudor del fiado: la cartera se filtra por nombre o teléfono y el alta se
+  // escribe en el mismo lugar (docs/FRONTEND.md:51; docs/PRODUCT.md:27).
+  const [debtorQuery, setDebtorQuery] = useState('')
+  const [selectedDebtor, setSelectedDebtor] = useState<CheckoutDebtor | null>(null)
+  const [registering, setRegistering] = useState(false)
+  const [debtorName, setDebtorName] = useState('')
+  const [debtorPhone, setDebtorPhone] = useState('')
+
+  const matchingDebtors = searchFiadoAccounts(debtors, debtorQuery).slice(0, 5)
 
   const receivedCents =
     method === 'fiado' ? 0 : receivedEntry === '' ? null : Number(receivedEntry)
@@ -57,12 +88,29 @@ export function CheckoutScreen({ lines, totalCents, onConfirm, onBack }: Checkou
           : receivedCents - totalCents
         : 0
   // El cierre exige vuelto posible: efectivo necesita un recibido ≥ total, y
-  // los demás métodos cobran el monto exacto por definición del tender.
+  // los demás métodos cobran el monto exacto por definición del tender. El
+  // fiado suma su propia precondición: sin deudor no hay a quién cobrarle.
   const canFinish =
     method !== null &&
     (method === 'cash'
       ? receivedCents !== null && receivedCents >= totalCents
-      : true)
+      : method === 'fiado'
+        ? selectedDebtor !== null
+        : true)
+
+  /** Registra un deudor nuevo sin salir del cobro (dos toques: nombre y confirmar). */
+  function registerDebtor(): void {
+    const name = debtorName.trim()
+    if (name === '') return
+
+    setSelectedDebtor({
+      id: crypto.randomUUID(),
+      name,
+      phone: debtorPhone.trim() === '' ? null : debtorPhone.trim(),
+      isNew: true,
+    })
+    setRegistering(false)
+  }
 
   function pressReceived(key: NumpadKey): void {
     if (key === NUMPAD_DELETE_KEY) {
@@ -128,6 +176,129 @@ export function CheckoutScreen({ lines, totalCents, onConfirm, onBack }: Checkou
         ))}
       </div>
 
+      {method === 'fiado' ? (
+        <section
+          aria-labelledby="checkout-debtor-title"
+          className="flex flex-col gap-2 rounded-2xl border border-surface-border bg-surface-card p-4"
+        >
+          <h3 className="text-caption-xs uppercase text-text-secondary" id="checkout-debtor-title">
+            Deudor
+          </h3>
+
+          {selectedDebtor === null ? (
+            <>
+              {registering ? (
+                <div className="flex flex-col gap-2">
+                  <input
+                    aria-label="Nombre del deudor"
+                    autoFocus
+                    data-testid="debtor-name"
+                    onChange={(event) => setDebtorName(event.target.value)}
+                    placeholder="Nombre"
+                    type="text"
+                    value={debtorName}
+                    className="min-h-12 rounded-xl border border-surface-border bg-surface-card px-3 text-body-md text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover"
+                  />
+                  <input
+                    aria-label="Teléfono del deudor (opcional)"
+                    data-testid="debtor-phone"
+                    onChange={(event) => setDebtorPhone(event.target.value)}
+                    placeholder="Teléfono (opcional)"
+                    type="tel"
+                    value={debtorPhone}
+                    className="min-h-12 rounded-xl border border-surface-border bg-surface-card px-3 text-body-md text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover"
+                  />
+                  <button
+                    type="button"
+                    data-testid="debtor-register"
+                    disabled={debtorName.trim() === ''}
+                    onClick={registerDebtor}
+                    className="min-h-12 rounded-xl bg-accent-hover px-3 text-body-md font-semibold text-white disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover"
+                  >
+                    Registrar deudor
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    aria-label="Buscar deudor"
+                    data-testid="debtor-search"
+                    onChange={(event) => setDebtorQuery(event.target.value)}
+                    placeholder="Buscar por nombre o teléfono"
+                    type="search"
+                    value={debtorQuery}
+                    className="min-h-12 rounded-xl border border-surface-border bg-surface-card px-3 text-body-md text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover"
+                  />
+                  {matchingDebtors.length === 0 ? (
+                    <p className="text-body-sm text-text-secondary" data-testid="debtor-empty">
+                      {debtors.length === 0
+                        ? 'Todavía no hay deudores. Registra el primero.'
+                        : 'Ningún deudor coincide con la búsqueda.'}
+                    </p>
+                  ) : (
+                    <ul aria-label="Deudores" className="flex flex-col gap-1">
+                      {matchingDebtors.map((debtor) => (
+                        <li key={debtor.id}>
+                          <button
+                            type="button"
+                            data-testid={`debtor-option-${debtor.id}`}
+                            onClick={() =>
+                              setSelectedDebtor({
+                                id: debtor.id,
+                                name: debtor.name,
+                                phone: debtor.phone,
+                                isNew: false,
+                              })
+                            }
+                            className="flex min-h-12 w-full items-center justify-between gap-2 rounded-xl border border-surface-border px-3 text-left text-body-md text-text-primary hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover"
+                          >
+                            <span className="font-semibold">{debtor.name}</span>
+                            <span className="font-mono text-caption-xs tabular-nums text-text-secondary">
+                              {debtor.phone ?? 'sin teléfono'}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="debtor-new"
+                    onClick={() => setRegistering(true)}
+                    className="min-h-12 rounded-xl border border-dashed border-surface-border px-3 text-body-md text-text-secondary hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover"
+                  >
+                    Nuevo deudor
+                  </button>
+                </>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex flex-col">
+                <span className="text-body-md font-semibold text-text-primary" data-testid="debtor-selected">
+                  {selectedDebtor.name}
+                </span>
+                <span className="font-mono text-caption-xs tabular-nums text-text-secondary">
+                  {selectedDebtor.phone ?? 'sin teléfono'}
+                  {selectedDebtor.isNew ? ' · se registra con este cargo' : ''}
+                </span>
+              </span>
+              <button
+                type="button"
+                data-testid="debtor-change"
+                onClick={() => {
+                  setSelectedDebtor(null)
+                  setDebtorQuery('')
+                }}
+                className="min-h-9 rounded-lg px-2 text-body-sm text-text-secondary hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover"
+              >
+                Cambiar
+              </button>
+            </div>
+          )}
+        </section>
+      ) : null}
+
       {method === 'cash' ? (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
@@ -169,7 +340,7 @@ export function CheckoutScreen({ lines, totalCents, onConfirm, onBack }: Checkou
           </span>
           <p className="text-body-sm text-text-secondary">
             {method === 'fiado'
-              ? 'El cobro queda en cuenta corriente del cliente.'
+              ? 'El cobro queda en cuenta corriente del deudor elegido.'
               : 'El cobro se registra por el importe exacto de la venta.'}
           </p>
         </div>
@@ -205,7 +376,13 @@ export function CheckoutScreen({ lines, totalCents, onConfirm, onBack }: Checkou
         onClick={() => {
           if (method === null) return
 
-          onConfirm(method, method === 'cash' ? (receivedCents ?? 0) : method === 'fiado' ? 0 : totalCents)
+          if (method === 'fiado') {
+            onConfirm(method, 0, selectedDebtor ?? undefined)
+
+            return
+          }
+
+          onConfirm(method, method === 'cash' ? (receivedCents ?? 0) : totalCents)
         }}
         className="min-h-[52px] rounded-xl bg-accent-hover text-heading-md font-bold text-white shadow-glow-emerald transition-transform duration-[120ms] ease-out hover:brightness-105 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-hover"
       >

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { CheckoutScreen } from '@/screens/CheckoutScreen'
+import { CheckoutScreen, type CheckoutDebtor } from '@/screens/CheckoutScreen'
 import { CartPanel } from '@/components/CartPanel'
 import { SaleTicket } from '@/components/SaleTicket'
 import { Button } from '@/components/ui/Button'
@@ -8,6 +8,8 @@ import { cartTotalCents, payableCartLines } from '@/cart/cartStore'
 import { useCartLines } from '@/hooks/useCartLines'
 import { submitSaleClose, buildSaleClosePayload, type SaleCloseOutcome } from '@/sales/saleClose'
 import { enqueueSaleClose, markSaleQueueStatus } from '@/sales/saleQueue'
+import { enqueueFiadoCharge } from '@/fiado/fiadoQueue'
+import { useFiadoWallet } from '@/hooks/useFiadoWallet'
 import type { TenderMethod } from '@/sales/tenderMethods'
 import { getPosDatabase, type PosDatabase } from '@/db/posDatabase'
 import { StorageQuotaBlockedError } from '@/db/quota'
@@ -31,6 +33,12 @@ import { ProductCatalogScreen } from '@/screens/ProductCatalogScreen'
  * sale con su `Idempotency-Key` (W5-FE-1). El acuse no dicta si la venta existe:
  * solo se dice en pantalla su estado real, y la cola conserva lo que quedó sin
  * confirmar para el badge de la cabecera.
+ *
+ * **El fiado suma un evento.** Una venta a fiado encola la venta —que proyecta
+ * el «esperado fiado» del arqueo (D11)— y el movimiento positivo que mueve la
+ * deuda, los dos en la misma transacción que vacía el carrito y con claves de
+ * idempotencia distintas (W7-FE-2; decisión 9 del sprint 7). El deudor se elige
+ * o se registra en el cobro, en dos toques.
  *
  * Sin token disponibles (el desbloqueo por PIN no restaura sesión en línea)
  * el POST no se dispara: el estado honesto de la entrega queda «sin
@@ -57,6 +65,12 @@ type FlowView = 'sale' | 'checkout' | 'closed'
  * Aviso no modal por cada fallo de cámara (§251-252): la venta nunca queda
  * bloqueada por el escáner y la verdad es específica del motivo.
  */
+/**
+ * Aviso del fiado sin deudor. La pantalla de cobro ya no deja finalizar sin
+ * deudor, así que este camino solo existe si un llamador saltara esa guarda.
+ */
+const fiadoWithoutDebtorNotice = 'Un fiado necesita un deudor: elige uno o regístralo en el cobro.'
+
 const SCANNER_FAILURE_NOTICES: Record<ScannerFailure, string> = {
   denied: 'Permiso de cámara denegado. La venta sigue desde la grilla.',
   unavailable: 'La cámara no está disponible. La venta sigue desde la grilla.',
@@ -111,6 +125,9 @@ export function CounterSaleScreen({
   const lines = useCartLines(database)
   const payable = payableCartLines(lines)
   const total = cartTotalCents(payable)
+  // La cartera local alimenta el selector de deudor del cobro: elegir uno es un
+  // toque, y registrar uno nuevo no sale del flujo de venta (W7-FE-2).
+  const { wallet } = useFiadoWallet(database)
 
   /** Fallback no bloqueante: el detalle del motivo y regreso a la grilla. */
   function handleScannerFailure(reason: ScannerFailure): void {
@@ -123,7 +140,11 @@ export function CounterSaleScreen({
     void addIdentifiedLine(code, database)
   }
 
-  async function confirmSale(method: TenderMethod, receivedCents: number): Promise<void> {
+  async function confirmSale(
+    method: TenderMethod,
+    receivedCents: number,
+    debtor?: CheckoutDebtor,
+  ): Promise<void> {
     // El payload congela las líneas tal cual; se PLANEA antes de tocar la cola
     // y el carrito para que el evento y el envío sean de la misma venta.
     const payload = buildSaleClosePayload(payable, { paymentMethod: method })
@@ -131,14 +152,30 @@ export function CounterSaleScreen({
     // el envío jamás abre una segunda venta.
     const key = crypto.randomUUID()
 
+    // Un fiado sin deudor no tiene a quién cobrarle: la pantalla ya lo impide y
+    // esta guarda cierra el tipo antes de escribir nada.
+    if (method === 'fiado' && debtor === undefined) {
+      setCloseFailure(fiadoWithoutDebtorNotice)
+      setView('sale')
+
+      return
+    }
+
     /*
      * La escritura va PRIMERO y es atómica (W5-FE-1): fila `pending` +
      * carrito vacío en una transacción. Matar la pestaña entre las dos
      * escrituras no puede perder el evento, y si la escritura falla el carrito
      * sigue ahí — el cobro no se pierde, se reintenta.
+     *
+     * En fiado la transacción cubre los DOS eventos y el alta local del deudor:
+     * la venta y el movimiento no pueden quedar separados (decisión 9).
      */
     try {
-      await enqueueSaleClose(payload, key, database)
+      if (method === 'fiado' && debtor !== undefined) {
+        await enqueueFiadoCharge({ sale: payload, saleKey: key, debtor }, database)
+      } else {
+        await enqueueSaleClose(payload, key, database)
+      }
     } catch (error) {
       // El bloqueo por cuota nombra su motivo (W6-FE-1): el cajero sabe que el problema es
       // el espacio del dispositivo y no la venta. Cualquier otro fallo conserva el aviso
@@ -185,6 +222,7 @@ export function CounterSaleScreen({
   if (view === 'checkout') {
     return (
       <CheckoutScreen
+        debtors={wallet.accounts}
         lines={payable.map((line) => ({ name: line.name, lineTotal: cartTotalCents([line]) }))}
         totalCents={total}
         onBack={() => setView('sale')}

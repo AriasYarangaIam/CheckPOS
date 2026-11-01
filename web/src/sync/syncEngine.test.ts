@@ -104,14 +104,19 @@ describe('sync engine batching', () => {
     expect(batch.every((row) => row.operation === 'sale')).toBe(true)
   })
 
-  it('orders a sale before its void and the cash close last', () => {
+  it('orders a sale before its void, the fiado movement after both and the cash close last', () => {
     const cashClose = queueRow({ operation: 'cash_close', created_at: '2026-10-23T09:00:00.000Z' })
     const voidRow = queueRow({ operation: 'void', created_at: '2026-10-23T08:00:00.000Z' })
     const saleRow = queueRow({ operation: 'sale', created_at: '2026-10-23T10:00:00.000Z' })
+    // El movimiento enlazado referencia `sales(sold_on, sale_id)`: la venta tiene
+    // que existir antes, y el cierre de caja se proyecta sobre el ledger ya
+    // confirmado (decisión 8 del sprint 7).
+    const fiadoRow = queueRow({ operation: 'fiado_movement', created_at: '2026-10-23T07:00:00.000Z' })
 
-    expect(nextBatch([cashClose, voidRow, saleRow]).map((row) => row.operation)).toEqual([
+    expect(nextBatch([cashClose, fiadoRow, voidRow, saleRow]).map((row) => row.operation)).toEqual([
       'sale',
       'void',
+      'fiado_movement',
       'cash_close',
     ])
   })
@@ -120,6 +125,7 @@ describe('sync engine batching', () => {
     expect(endpointFor(queueRow({ operation: 'sale' }))).toBe('/sales')
     expect(endpointFor(queueRow({ operation: 'void' }))).toBe('/sales/019a0000-0000-7000-8000-000000000001/void')
     expect(endpointFor(queueRow({ operation: 'cash_close' }))).toBe('/cash-closes')
+    expect(endpointFor(queueRow({ operation: 'fiado_movement' }))).toBe('/fiado-movements')
   })
 })
 

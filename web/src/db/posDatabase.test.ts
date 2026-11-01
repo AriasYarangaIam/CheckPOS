@@ -153,6 +153,12 @@ const DECLARED_STORES: readonly {
   // negocio —un cierre por fecha, como la UNIQUE del servidor— e `id` queda
   // como índice para rastrear el cierre acusado desde su fila.
   { table: 'cash_closes', primaryKey: 'closed_on', indexes: ['id'] },
+  // Versión 4 (W7-FE-1): el registro de deudores del dispositivo. Sin saldo: el
+  // saldo es la suma de `fiado_movements` y se computa (decisión 7 del sprint 7).
+  { table: 'fiado_accounts', primaryKey: 'id', indexes: ['name', 'phone'] },
+  // Versión 4 (W7-FE-1): el ledger firmado local. `fiado_account_id` sirve el
+  // detalle de una cuenta y `created_at` el orden del historial.
+  { table: 'fiado_movements', primaryKey: 'id', indexes: ['fiado_account_id', 'created_at'] },
 ]
 
 /** Clave primaria y caminos de índice declarados, tabla por tabla. */
@@ -205,6 +211,8 @@ describe('PosDatabase schema', () => {
       'cart',
       'cash_closes',
       'device_session',
+      'fiado_accounts',
+      'fiado_movements',
       'idempotency_queue',
       'products',
     ])
@@ -425,7 +433,7 @@ describe('PosDatabase schema upgrade', () => {
     try {
       await upgraded.open()
 
-      expect(upgraded.verno).toBe(3)
+      expect(upgraded.verno).toBe(4)
       expect(await upgraded.products.get('prod-1')).toEqual(LOCAL_PRODUCT)
       expect(await upgraded.cart.orderBy('id').toArray()).toEqual(CART_LINES)
       expect(await upgraded.idempotency_queue.orderBy('id').toArray()).toEqual(QUEUED_EVENTS)
