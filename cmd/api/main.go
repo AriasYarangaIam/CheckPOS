@@ -25,6 +25,10 @@
 //	POST /cash-closes       cierre de caja: proyección F8 por método (Sprint 5, W5-BE-1)
 //	POST /photos            upload multipart: 200 con la URL del objeto, sin bytes en la
 //	                        base (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3)
+//	GET  /fiado-accounts    cartera de deudores: saldo computado e historial firmado
+//	                        (Sprint 7, W7-BE-1/W7-BE-3, docs/BACKEND.md §4.12)
+//	POST /fiado-movements   cargo o abono firmado con upsert atómico del deudor dentro de la
+//	                        transacción del claim (Sprint 7, W7-BE-2, §4.11)
 //
 // SIGINT y SIGTERM disparan un apagado ordenado: el servidor deja de aceptar conexiones
 // y espera las peticiones en vuelo antes de cerrar los pools.
@@ -265,6 +269,17 @@ func run() error {
 		return err
 	}
 
+	// El módulo Fiado (Sprint 7, W7-BE-1/W7-BE-2): la cartera con saldo COMPUTADO y el
+	// movimiento firmado con el upsert atómico del deudor dentro de la transacción del claim.
+	// Las dos superficies corren sobre el MISMO pool de negocio: el saldo no es un dato de la
+	// cuenta, es la suma del ledger que el RLS deja ver (docs/BACKEND.md §4.12;
+	// docs/DATABASE.md §7.8).
+	fiadoMovements, err := fiado.NewFiadoMovementHandler(
+		fiado.NewPostgresMovementStore(postgres.NewTenantPool(pool)), logger)
+	if err != nil {
+		return err
+	}
+
 	// El almacenamiento de objetos de las fotos (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3):
 	// el store local es la caja fuerte del contrato y el handler NO toca la base —la URL
 	// que devuelve es la única pieza que el cliente mandará después en photo_url.
@@ -309,6 +324,10 @@ func run() error {
 			// El upload de fotos: multipart, 200 con la URL pública del objeto y NINGÚN byte
 			// en la base (docs/BACKEND.md §10.3).
 			mux.Handle("POST /photos", identity.RequireAccessToken(issuer, photosHandler))
+			// La cartera de deudores y el movimiento de fiado: el tenant sale SOLO de los
+			// claims del token, y el saldo que viaja es el computado, nunca una columna
+			// (docs/BACKEND.md §4.11, §4.12).
+			mux.Handle("POST /fiado-movements", identity.RequireAccessToken(issuer, fiadoMovements))
 		})),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
