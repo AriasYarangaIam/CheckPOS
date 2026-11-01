@@ -280,6 +280,16 @@ func run() error {
 		return err
 	}
 
+	// La cartera de deudores (Sprint 7, W7-BE-1/W7-BE-3): las cuentas del tenant con su saldo
+	// COMPUTADO y el historial firmado completo, que es también la ruta de restauración tras
+	// reinstalar. El saldo no es un dato de la cuenta: es la suma del ledger que el RLS deja
+	// ver (docs/BACKEND.md §4.12).
+	fiadoAccounts, err := fiado.NewFiadoAccountsHandler(
+		fiado.NewPostgresAccountsStore(postgres.NewTenantPool(pool)), logger)
+	if err != nil {
+		return err
+	}
+
 	// El almacenamiento de objetos de las fotos (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3):
 	// el store local es la caja fuerte del contrato y el handler NO toca la base —la URL
 	// que devuelve es la única pieza que el cliente mandará después en photo_url.
@@ -327,6 +337,7 @@ func run() error {
 			// La cartera de deudores y el movimiento de fiado: el tenant sale SOLO de los
 			// claims del token, y el saldo que viaja es el computado, nunca una columna
 			// (docs/BACKEND.md §4.11, §4.12).
+			mux.Handle("GET /fiado-accounts", identity.RequireAccessToken(issuer, fiadoAccounts))
 			mux.Handle("POST /fiado-movements", identity.RequireAccessToken(issuer, fiadoMovements))
 		})),
 		ReadHeaderTimeout: 5 * time.Second,
