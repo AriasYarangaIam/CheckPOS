@@ -219,6 +219,24 @@ dueño. **Consecuencia declarada y aceptada:** sin una sesión de dueño, la col
 hacia el servidor. No se agrega la UI de `POST /auth/login` ni la de `POST /auth/device-bind`, y el
 cierre de la entrega lo registra como límite conocido, no como olvido.
 
+### D-G · Forma de `POST /stock-adjustments` (decidida al implementar, T4)
+
+`docs/BACKEND.md` §4.14 fija el cuerpo pero no el acuse. Forma congelada: `200` con
+`{ "adjustment": { id, tenant_id, product_id, qty_delta, source, reason, created_at, received_at,
+sold_on, sale_id }, "product": { "product_id", "stock" } }` — el ajuste resuelto más el nivel de
+stock que la base confirmó, la misma pieza que el acuse de la venta publica para su refresco de
+producto. Reglas del borde: el delta es negativo y distinto de cero, `source` solo puede ser
+`manual` (los deltas de venta y anulación los escribe el ledger, así que la superficie los RECHAZA
+en lugar de aceptarlos), `reason` es uno de los tres textos exactos y el ajuste manual no lleva
+enlace a venta.
+
+### D-H · `user_id` del token de administrador (resuelta al implementar, T3)
+
+§5.1 exige `user_id` en todo token y el dueño no tiene fila propia. El token lleva el `user_id` de
+la persona cuyo teléfono resolvió la identidad, y la autoridad la da el hash del tenant: el
+privilegio no viene del usuario, así que conocer la contraseña de empleado no convierte a nadie en
+administrador. El camino completo está en `internal/identity/admin_login.go`.
+
 ### Decisiones aplicadas por recomendación (sin objeción en la ronda de decisiones)
 
 - **D-E · Qué cuenta el dashboard como «ventas netas».** Recomendación: la proyección del ledger
@@ -231,15 +249,15 @@ cierre de la entrega lo registra como límite conocido, no como olvido.
   agregaría una dependencia y un secreto que el sprint no tiene presupuestados; si lo quieres, es un
   addendum explícito.
 
-## Tasks (provisionales: dependen de D-A a D-D)
+## Tasks
 
 - [ ] **T1** Documento del sprint + rama `feat/sprint-8-admin-hardening` — RUTA: inline. S: S1.
-- [ ] **T2** W8-DB-1 · Columna `master_password_hash` + concesión por columna a `pos_auth` + backfill con hash inutilizable, más el subcomando `admin-password` — RUTA: inline (D-A=A1, D-B=B1). S: S11, S16.
-- [ ] **T3** W8-BE-1 · `POST /auth/admin-login` con `401` genérico constante — RUTA: inline (test-first). S: S7, S13.
-- [ ] **T4** W8-BE-2 · `POST /stock-adjustments` con los tres motivos exactos y stock aditivo — RUTA: inline (test-first). S: S8, S13.
-- [ ] **T5** W8-BE-3 · Pin del sobre único y de los `422` de `PATCH`, más los bordes que falten — RUTA: inline. S: S9, S13.
-- [ ] **T6** W8-BE-4 · Revisión de logs sin PIN, fotos ni payloads, y canal de la alerta — RUTA: inline. S: S10.
-- [ ] **T7** W8-DB-2 · Revisión del contrato de esquema contra el checklist (14 tablas, 2 JSONB, 6 tenders, concesiones, append-only) — RUTA: inline. S: S12.
+- [x] **T2** W8-DB-1 · Columna `master_password_hash` + concesión por columna a `pos_auth` + backfill con hash inutilizable, más el subcomando `admin-password` — RUTA: inline (D-A=A1, D-B=B1). S: S11, S16. Commit: `af96035`.
+- [x] **T3** W8-BE-1 · `POST /auth/admin-login` con `401` genérico constante — RUTA: inline (test-first). S: S7, S13. Commit: `4776cc6`.
+- [x] **T4** W8-BE-2 · `POST /stock-adjustments` con los tres motivos exactos y stock aditivo — RUTA: inline (test-first). S: S8, S13. Commit: `f5951ba`.
+- [x] **T5** W8-BE-3 · Pin del sobre único y de los `422` de `PATCH`, más los bordes que falten — RUTA: inline. S: S9, S13. Commit: `76de2ec`.
+- [x] **T6** W8-BE-4 · Revisión de logs sin PIN, fotos ni payloads, y canal de la alerta — RUTA: inline. S: S10. Commit: `76de2ec`.
+- [x] **T7** W8-DB-2 · Revisión del contrato de esquema contra el checklist (14 tablas, 2 JSONB, 6 tenders, concesiones, append-only) — RUTA: inline. S: S12. Commit: `16892aa`.
 - [ ] **T8** W8-FE-1 · Selector de rol y credencial Admin, primer token del cliente en `sessionStorage`; el Empleado sigue por PIN sin token — RUTA: inline (D-C=C2, D-D=D1). S: S2, S13.
 - [ ] **T9** W8-FE-2 · Shell Admin de 240px con seis destinos y cierre de sesión client-side — RUTA: inline. S: S3.
 - [ ] **T10** W8-FE-3 · Dashboard Admin sobre la proyección local más `GET /fiado-accounts` — RUTA: inline (depende de D-E). S: S4, S13, S15.
@@ -256,7 +274,69 @@ primero** (T2–T7), **acceso Admin** (T8–T9) y **pantallas de datos** (T10–
 token no hay forma de probar el dashboard contra `GET /fiado-accounts`, y hasta que exista la merma no
 hay forma de probar el semáforo de inventario moviendo stock.
 
+## Verificación del bloque T2–T7 (esquema, backend y endurecimiento)
+
+Corrida del bloque (2026-10-31, contenedor PostgreSQL arriba):
+
+- `go build ./... && go vet ./...` → exit 0.
+- `go test ./... -count=1` → 15 paquetes `ok`, 0 fallos, exit 0.
+
+Criterio por criterio de S13, en lo que este bloque cubre:
+
+1. **Token de empleado sin `role`, token de Admin con `role:"admin"`.**
+   `internal/identity/admin_login_test.go` (`TestAdminLoginIssuesAnAdminTokenWithTheTenantName`:
+   el token emitido verifica con `IsAdmin()` verdadero y el tenant y el usuario del teléfono) y la
+   prueba de integración `TestAdminLoginOverTheRealCredentials`. El camino de empleado sigue sin el
+   claim, que ya estaba fijado en `internal/identity/token_test.go`.
+2. **El `401` del login de administrador es genérico y constante.**
+   `TestAdminLoginAnswersTheSameGeneric401ForEveryFailure` compara el cuerpo de los cuatro caminos
+   —teléfono inexistente, contraseña incorrecta, tenant sin registro y hash ilegible— byte a byte, y
+   la integración lo repite contra la base real incluyendo un tenant cuyo hash es el inutilizable de
+   W8-DB-1.
+3. **Los tres motivos de merma son exactamente los del contrato.**
+   `internal/catalog/stock_adjustment_test.go` acepta los tres y rechaza `vencimiento` en minúsculas,
+   `Dano en vitrina` sin tilde, `Robo`, `Vencido` y la ausencia del motivo, cada uno con su `field`.
+4. **La merma no tiene captura de foto.** No hay campo en el cuerpo, ni columna en el esquema
+   (delta D5, sin DDL). La prueba del cuerpo no conoce la foto porque el contrato no la tiene.
+5. **Ningún rol de runtime borra ni actualiza el ledger.**
+   `internal/platform/postgres/grants_contract_test.go` (matriz de concesiones, cero `DELETE` para
+   roles de runtime salvo la retención de `pos_maintenance`) y
+   `internal/platform/postgres/append_only_contract_test.go` (las cinco tablas rechazan `UPDATE` y
+   `DELETE` con 55006). Ambos siguen verdes sin cambios: el bloque no tocó concesiones.
+6. **W8-DB-1: la columna existe, el login se puede implementar y «tenant sin hash» está decidido.**
+   `internal/identity/master_password_integration_test.go`: `NOT NULL` con valor por defecto
+   inutilizable y aleatorio por fila, `pos_auth` leyendo exactamente tres columnas del registro
+   (`created_at` da 42501), y el alta produciendo un argon2id que verifica solo con la contraseña
+   elegida. La decisión A1 queda además fijada por la prueba de integración del login, que demuestra
+   que un tenant recién creado no puede autenticarse.
+7. **W8-DB-2: el checklist de arquitectura, entero.**
+   `internal/platform/postgres/schema_contract_test.go` cubre 14 tablas, `tenders`/`sync_events`
+   ausentes, particionado por rango, PK `(sold_on, sale_id)`, dinero `bigint`, sin `numeric`/`float`
+   fuera de cantidades, JSONB en dos columnas, y —agregado en este bloque— los **seis** valores de
+   `payment_method` idénticos en `sales` y `cash_close_counts` y las tablas globales sin
+   `tenant_id`, sin RLS y sin política.
+8. **S9: un solo sobre de error y los `422` del borde.**
+   `internal/platform/httpx/envelope_audit_test.go` recorre las fuentes de producción y falla ante
+   `http.Error`, un `WriteHeader` con estado de error o un literal de error armado a mano, y exige
+   que `cmd/api` monte las rutas por `httpx.NewRouter`. Los `422` de `PATCH /products` por `stock` y
+   por intento de quitar un campo ya estaban fijados en `internal/catalog/product_test.go`
+   (Sprint 3) y siguen verdes.
+9. **S10: los logs no llevan credenciales, fotos ni payloads; la alerta tiene canal.**
+   `TestAdminLoginNeverLogsTheCredential`, `TestAdminPasswordNeverLogsTheCredential` (W8-DB-1) y
+   `TestStockAdjustmentNeverLogsThePayload`. La alerta de particiones queda en el canal decidido
+   (D-F): la línea `event=partitions.alert` con `stranded_rows` y el comando de remediación, más la
+   salida no-cero, y sin ningún dato del tenant.
+
+Pendiente de este sprint (T8–T13): las seis pantallas del rol Admin y el cierre. **No** hay endpoint
+de reporte ni de agregados: el dashboard se alimenta solo de la proyección local más
+`GET /fiado-accounts`, así que este bloque no agregó ninguna superficie de datos.
+
 ## Log
+
+- **L4** (hueco de contrato resuelto en el login, no inventado): §5.1 exige `user_id` en TODO token, y el dueño no tiene fila propia. La resolución es la que el propio contrato sugiere: el teléfono resuelve primero un `users` (identidad y tenant), y la autoridad administrativa la da la contraseña maestra del tenant. El `user_id` del token es el de la persona cuyo teléfono se usó, así que conocer la contraseña de empleado no convierte a nadie en administrador.
+- **L5** (corrección medida al escribir la migración): los campos base64 del PHC tienen que ser UN solo cuanto canónico cada uno. Pegar dos trozos recortados de relleno desplaza la alineación de bits y el decodificador estricto de Go rechaza la cadena como inválida; la sal y la clave son entonces una sola tirada de 32 bytes por campo.
+- **L6** (corrección medida en la revisión de esquema): filtrar `pg_constraint` por nombre devuelve una fila por partición de `sales`, porque cada partición clona los CHECK del padre. La consulta del contrato une con `pg_class` para quedarse con las dos tablas reales.
+- **L7** (límite declarado, no omisión): `uom` NO es un conjunto acotado en el contrato —`docs/DATABASE.md` §4 da `'unit'` y `'kg'` como ejemplo, no como lista cerrada, y no hay CHECK en el esquema—. No se inventa una lista para "validar conjuntos acotados": los conjuntos que el contrato SÍ fija son `payment_method` (seis), `source` (tres), los tres motivos de merma y `plan` (sin endpoint de escritura). Todos los que reciben entrada del cliente están validados en el borde.
 
 - **L1** (solicitud del usuario, verbatim): «Me indicas de que trata, ve preparando todo para continuar con el siguiente Sprint y me dejas en claro las dudas abiertas respecto al diseño del software en este sprint.»
 - **L2** (decisiones de diseño, respondidas por el usuario el 2026-10-31): **D-A = A1** (`master_password_hash TEXT NOT NULL` con backfill de hash argon2id aleatorio inutilizable; «tenant sin hash» deja de existir y la divergencia §11.4 #7 queda resuelta sin enmendar el contrato). **D-B = B1** (`cmd/maintenance admin-password`, contraseña por entrada estándar, sin ruta HTTP nueva). **D-C = C2** (token del dueño en `sessionStorage`: sobrevive recargas de la pestaña y muere al cerrarla). **D-D = D1** (solo el Administrador tiene sesión en línea; el Empleado opera offline por PIN, con la consecuencia declarada de que sin sesión de dueño la cola no drena).
