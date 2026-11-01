@@ -103,7 +103,7 @@ Contrato: `docs/BACKEND.md` §4.12, `docs/DESIGN.md:787` (historial con saldo co
 
 Corolario: no se agrega la columna, no se agrega el badge de límite y no se inventa el umbral.
 
-## Decisiones de forma (`(propueta)`/`(propuesta)` donde el contrato no fija la forma)
+## Decisiones de forma (`(propuesta)` donde el contrato no fija la forma)
 
 Contrato congelado para que las dos capas implementen la misma forma; ninguna de estas decisiones
 agrega requisitos.
@@ -206,18 +206,90 @@ agrega requisitos.
 
 ## Tasks
 
-- [ ] **T1** Documento del sprint + rama `feat/sprint-7-fiados` — RUTA: inline. S: S1.
-- [ ] **T2** W7-DB-1 · Contrato de esquema fijado por prueba: sin saldo escribible, ledger firmado append-only, par-nulidad — RUTA: writer backend. S: S2, S11.
-- [ ] **T3** W7-DB-2 · Upsert atómico de la cuenta en la transacción del movimiento, con rollback total — RUTA: writer backend. S: S3.
-- [ ] **T4** W7-BE-1 · Registro de cliente (nombre obligatorio, teléfono opcional) y `GET /fiado-accounts` con saldo computado — RUTA: writer backend. S: S4, S11.
-- [ ] **T5** W7-BE-2 · `POST /fiado-movements` con claim de idempotencia (A/B/C) — RUTA: writer backend. S: S5, S11.
-- [ ] **T6** W7-BE-3 · Historial firmado servido para restaurar tras reinstalar — RUTA: writer backend. S: S6.
-- [ ] **T7** W7-BE-4 · Sin camino WhatsApp/WABA/`wa.me`, fijado por prueba — RUTA: writer frontend. S: S7, S11.
-- [ ] **T8** W7-FE-1 · Cartera de deudores con búsqueda por nombre o teléfono y saldo computado — RUTA: writer frontend. S: S8, S13.
-- [ ] **T9** W7-FE-2 · Cargo a fiado desde el carrito con registro en 2 clics, y abono parcial — RUTA: writer frontend. S: S9, S11, S12.
-- [ ] **T10** W7-FE-3 · Historial de movimientos firmados y restauración desde el servidor — RUTA: writer frontend. S: S10, S12.
-- [ ] **T11** T-CLOSE · Verificación completa y criterios 1:1 — RUTA: inline. S: S11, S12, S13.
+- [x] **T1** Documento del sprint + rama `feat/sprint-7-fiados` — RUTA: inline. S: S1. Commit: `0898fde`.
+- [x] **T2** W7-DB-1 · Contrato de esquema fijado por prueba: sin saldo escribible, ledger firmado append-only, par-nulidad — RUTA: writer (fallback inline, L2). S: S2, S11. Commit: `c01d6cb`.
+- [x] **T3** W7-DB-2 · Upsert atómico de la cuenta en la transacción del movimiento, con rollback total — RUTA: writer (fallback inline, L2). S: S3. Commit: `2f07cd0`.
+- [x] **T4** W7-BE-1 · Registro de cliente (nombre obligatorio, teléfono opcional) y `GET /fiado-accounts` con saldo computado — RUTA: writer (fallback inline, L2). S: S4, S11. Commit: `ac846a6`.
+- [x] **T5** W7-BE-2 · `POST /fiado-movements` con claim de idempotencia (A/B/C) — RUTA: writer (fallback inline, L2). S: S5, S11. Commit: `2f07cd0`.
+- [x] **T6** W7-BE-3 · Historial firmado servido para restaurar tras reinstalar — RUTA: writer (fallback inline, L2). S: S6. Commit: `ac846a6`.
+- [x] **T7** W7-BE-4 · Sin camino WhatsApp/WABA/`wa.me`, fijado por prueba — RUTA: writer (fallback inline, L2). S: S7, S11. Commit: `b2f19b0`.
+- [x] **T8** W7-FE-1 · Cartera de deudores con búsqueda por nombre o teléfono y saldo computado — RUTA: writer (fallback inline, L2). S: S8, S13. Commit: `b2f19b0`, `d4f8c52`.
+- [x] **T9** W7-FE-2 · Cargo a fiado desde el carrito con registro en 2 clics, y abono parcial — RUTA: writer (fallback inline, L2). S: S9, S11, S12. Commit: `b2f19b0`, `d4f8c52`.
+- [x] **T10** W7-FE-3 · Historial de movimientos firmados y restauración desde el servidor — RUTA: writer (fallback inline, L2). S: S10, S12. Commit: `b2f19b0`, `d4f8c52`.
+- [x] **T11** T-CLOSE · Verificación completa y criterios 1:1 — RUTA: inline. S: S11, S12, S13. Commit: este documento.
+
+## Verificación (T-CLOSE)
+
+Comandos de la corrida final (2026-10-31, contenedor PostgreSQL arriba):
+
+- `go build ./... && go vet ./...` → exit 0.
+- `go test ./... -count=1` → 15 paquetes `ok`, 0 fallos, exit 0.
+- `cd web && npx vitest run` → **379 pruebas en 40 archivos**, 0 fallos.
+- `cd web && npx tsc --noEmit` → exit 0.
+
+Criterios de S11, uno por uno:
+
+1. **El saldo iguala `SUM(fiado_movements.amount_cents)` y la escritura directa de un saldo se rechaza.**
+   `internal/fiado/schema_integration_test.go` (`TestFiadoAccountsHaveNoWritableBalance`: ninguna
+   columna de saldo en `information_schema`, `UPDATE ... balance_cents` → SQLSTATE 42703, y el saldo
+   computado 1500 − 500 = 1000). Del lado del dispositivo, `web/src/fiado/fiadoStore.test.ts` fija
+   que la fila de la cuenta no tiene saldo y `accountBalanceCents([])` = 0.
+2. **El signo del monto es el tipo; no existe una columna `kind`.**
+   `TestFiadoMovementsHaveNoKindColumn` (0 columnas de tipo, `SELECT kind` → 42703); el abono viaja
+   negativo en `internal/fiado/movement_integration_test.go` (`TestMovementReplaysTheStoredSnapshot`
+   deja −500) y en `web/src/fiado/fiadoQueue.test.ts`.
+3. **La anulación produce un movimiento compensatorio, nunca un `DELETE` ni una edición.**
+   `TestFiadoLedgerIsAppendOnly`: `UPDATE` y `DELETE` responden 55006 incluso con el rol dueño y la
+   fila original queda intacta. Límite declarado (decisión 5): la superficie de anulación de una venta
+   a fiado —el POST del movimiento compensatorio desde la interfaz— no es de esta semana; el contrato
+   la permite y la guarda la obliga.
+4. **El cargo a fiado funciona offline y sincroniza de forma idempotente.**
+   `TestMovementIsIdempotentUnderRetries` (tres envíos de la misma clave → un movimiento, un claim y
+   el mismo acuse) y, del lado cliente, `web/src/sync/syncEngine.test.ts` (orden `sale` → `void` →
+   `fiado_movement` → `cash_close` y `endpointFor` → `/fiado-movements`).
+5. **El registro del deudor se hace en dos toques y la deuda sobrevive a la reinstalación.**
+   `web/src/screens/CheckoutScreen.test.tsx` (fiado no cierra sin deudor; alta en dos toques con
+   teléfono opcional) y `TestAccountsRestoresTheHistoryAfterAReinstall` más
+   `web/src/fiado/restoreFiado.test.ts` (un dispositivo vacío reconstruye cuentas, movimientos y
+   saldos; la cola y el catálogo no se tocan).
+6. **No existe ningún camino de recordatorio por WhatsApp.**
+   `web/src/fiado/noWhatsApp.test.ts` recorre fuentes y assets públicos (sin comentarios ni archivos de
+   prueba) y exige cero coincidencias de `wa.me`, `whatsapp` y WABA; el share usa `navigator.share`.
+
+S13 (advertencia de alcance): no se agregó `credit_limit_cents`, no hay badge de límite y la pantalla
+no renderiza umbral alguno — la columna sigue siendo nota docs-only (delta D4).
+
+S12 (Definition of Done): el cargo y el pago parcial funcionan offline (cola local + motor de drenaje),
+los saldos son computados en las dos capas y ninguna cuenta ni movimiento se pierde tras reinstalar
+(restauración desde `GET /fiado-accounts`).
+
+## Cadena de entrega
+
+Rama `feat/sprint-7-fiados`, anclada en `develop` (que es idéntico a `main`: el Sprint 6 aterrizó por
+los PRs #37–#45 y el #46 llevó `develop` a `main`). Los commits son unidades de revisión; **no se
+abrió ningún PR ni se empujó nada**: push, PR y merge son decisiones del usuario.
+
+| Unidad | Commit | Líneas | Contenido |
+| --- | --- | --- | --- |
+| 1 | `0898fde` | 200 | El documento del sprint con el contrato de forma congelado |
+| 2 | `c01d6cb` | 490 | El contrato de esquema fijado por prueba (W7-DB-1) |
+| 3 | `2f07cd0` | 1484 | `POST /fiado-movements`: claim, upsert atómico, saldo computado (`size:exception`) |
+| 4 | `ac846a6` | 554 | `GET /fiado-accounts`: cartera, historial y restauración (`size:exception`) |
+| 5 | `b2f19b0` | 1316 | Capa de datos del cliente: esquema v4, cola del fiado, restauración, sin WhatsApp |
+| 6 | `d4f8c52` | 1184 | Cobro a fiado en dos toques, cartera, abono parcial y navegación |
+
+Total: 35 archivos, 5.028 líneas agregadas. Las unidades 3 a 6 exceden el presupuesto de ~400 líneas
+por el mismo motivo que los cortes del Sprint 6 (`size:exception`): una unidad de comportamiento con
+su prueba de integración no se parte sin dejar una mitad sin cobertura.
 
 ## Log
 
 - **L1** (solicitud del usuario, verbatim): «Necesito que prosigas con el plan actual del proyecto (el siguiente Sprint que corresponda), luego de verificar que los anteriores cambios al Sprint que se avanzo se encuentren dentro de la rama "main".»
+- **L2** (delegación, no ejecutada): los dos paquetes `gentle-ai-worker` fallaron con «assistant reported an error» y **cero** llamadas a herramientas, así que T2–T10 se ejecutaron inline por el orquestador. Se reporta como *fallback*, no como ruta preferida: la regla de writers pedía delegar dos unidades independientes (backend y frontend) y el mecanismo no estaba disponible — el mismo fallo que L2 del Sprint 6.
+- **L3** (verificación de entrada, medida): `git diff develop main` sobre `internal web cmd migrations docs` da 0 líneas; `git log --oneline main` contiene los PRs #37–#45 del Sprint 6 y el #46 (`develop` → `main`). Los cambios anteriores están efectivamente en `main`.
+- **L4** (hueco de contrato resuelto, no inventado): `docs/BACKEND.md` §4.11 no trae campos de la cuenta en el cuerpo del movimiento, y los 13 caminos de §4 agotan la superficie HTTP, así que no existe un `POST /fiado-accounts`. El alta del deudor viaja como objeto opcional `fiado_account` (nombre obligatorio, teléfono opcional, `updated_at` opcional para el comparador LWW) y se materializa con el upsert atómico de F12 (`docs/DATABASE.md` §7.8). Queda congelado como decisiones 1 y 2 de forma.
+- **L5** (corrección medida sobre el diseño): el `fiado_account` del cuerpo solo se envía cuando el deudor es NUEVO. Enviarlo en cada cargo habría hecho que el `updated_at` del servidor fuera siempre mayor que el almacenado y el upsert pisara el nombre en cada venta — exactamente el daño que §7.4 acota a nombre y teléfono. Probado en `TestMovementUpdatesTheAccountUnderLWLBound` y en `web/src/fiado/fiadoQueue.test.ts`.
+- **L6** (límite declarado, no omisión): el tender del abono (Efectivo/transferencia) es solo de interfaz. `fiado_movements` no tiene columna de medio de pago y §4.11 no la transporta, así que no se agrega la columna ni se dobla el medio dentro de `note`.
+- **L7** (ajuste de interfaz encontrado por la prueba): la restauración se movió fuera del detalle del deudor. Su caso de uso es un dispositivo reinstalado, que después del login no tiene ninguna cuenta local —y por lo tanto ningún detalle donde alojar el botón—.
+- **L8** (T2 sin rojo): las pruebas de esquema pasaron en la primera corrida porque el DDL de `migrations/20261015000005_fiado.sql` y las guardas de `20261019000001` ya existían desde los Sprints 1 y 4. La entrega de W7-DB-1 es el PIN de ese contrato, no una corrección; el rojo observado en el resto de las tareas fue de compilación (la superficie nueva definida por su prueba antes de existir) y después de comportamiento en los casos de LWW, rollback y aislamiento.
+- **L9** (cambios pedidos sobre comportamiento ya fijado): cuatro pruebas existentes cambiaron porque el sprint cambia lo que fijaban —el cierre a fiado ahora exige deudor, el esquema local sube a la versión 4, la navegación habilita `Cuentas y Fiados` y la lista de tiendas declaradas crece—. Ninguna se debilitó: cada una se reescribió con la regla nueva y su caso positivo.
