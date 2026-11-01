@@ -27,6 +27,11 @@ func newFiadoIntegrationRouter(t *testing.T, tenants *postgres.TenantPool, logBu
 		t.Fatalf("NewFiadoMovementHandler: %v", err)
 	}
 
+	accounts, err := fiado.NewFiadoAccountsHandler(fiado.NewPostgresAccountsStore(tenants), logger)
+	if err != nil {
+		t.Fatalf("NewFiadoAccountsHandler: %v", err)
+	}
+
 	tokenIssuer := newTestIssuer(t)
 
 	return httpx.NewRouter(
@@ -34,6 +39,7 @@ func newFiadoIntegrationRouter(t *testing.T, tenants *postgres.TenantPool, logBu
 		alwaysReady{},
 		httpx.WithRoutes(func(mux *http.ServeMux) {
 			mux.Handle("POST /fiado-movements", identity.RequireAccessToken(tokenIssuer, movements))
+			mux.Handle("GET /fiado-accounts", identity.RequireAccessToken(tokenIssuer, accounts))
 		}),
 	), tokenIssuer
 }
