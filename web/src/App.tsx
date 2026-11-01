@@ -7,6 +7,7 @@ import { PendingSyncBadge } from '@/components/PendingSyncBadge'
 import { CashCloseScreen } from '@/screens/CashCloseScreen'
 import { CounterSaleScreen } from '@/screens/CounterSaleScreen'
 import { EmployeeAccessScreen } from '@/screens/EmployeeAccessScreen'
+import { FiadoAccountsScreen } from '@/screens/FiadoAccountsScreen'
 
 /**
  * Shell de la PWA. Su entrada es la pantalla de acceso del empleado
@@ -28,11 +29,12 @@ import { EmployeeAccessScreen } from '@/screens/EmployeeAccessScreen'
  * antes del PIN: la pantalla de acceso sigue siendo la puerta y ningún panel
  * operativo se abre por delante de ella.
  *
- * Las dos superficies del sprint viven en `main` y el shell cambia entre ellas
- * sin recargar: la venta de mostrador y el arqueo de caja. El token en línea
- * todavía no se obtiene en el arranque —el ingreso en línea es de la Semana 8—,
- * así que la venta y el cierre se muestran sin token y cada uno dice su estado
- * honesto: la venta cierra localmente y el cierre de caja espera el acuse.
+ * Las superficies operativas viven en `main` y el shell cambia entre ellas sin
+ * recargar: la venta de mostrador, el arqueo de caja y la cartera de deudores
+ * (W7-FE-1). El token en línea todavía no se obtiene en el arranque —el ingreso
+ * en línea es de la Semana 8—, así que cada pantalla dice su estado honesto: la
+ * venta y el fiado cierran localmente, el cierre de caja espera el acuse y la
+ * restauración del fiado se saltea sin sesión.
  */
 export function App() {
   const [unlocked, setUnlocked] = useState(false)
@@ -68,6 +70,8 @@ export function App() {
         {unlocked ? (
           surface === 'cash-close' ? (
             <CashCloseScreen onBack={() => setSurface('sale')} />
+          ) : surface === 'accounts' ? (
+            <FiadoAccountsScreen onBack={() => setSurface('sale')} />
           ) : (
             <CounterSaleScreen />
           )

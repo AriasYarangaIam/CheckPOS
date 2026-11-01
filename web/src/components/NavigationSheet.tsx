@@ -24,11 +24,12 @@ import { cn } from '@/lib/utils'
  * 6). Panel lateral de Radix —foco atrapado, `Esc` y `aria-modal` los aporta el
  * primitivo, no se reimplementan— con los destinos en el orden del documento.
  *
- * **Solo dos destinos tienen superficie en este sprint.** `Punto de Venta`
- * cierra el panel y `Gestión de Caja y Turnos` abre el arqueo; los otros cuatro
- * son de las Semanas 7 y 8 y se muestran como explícitamente NO disponibles
- * (`aria-disabled` + «Próximamente») en lugar de navegar a una pantalla que no
- * existe (decisión 6 del sprint).
+ * **Los destinos con superficie se abren; el resto se anuncia.** `Punto de
+ * Venta` cierra el panel, `Gestión de Caja y Turnos` abre el arqueo y `Cuentas y
+ * Fiados` abre la cartera de deudores (W7-FE-1). Los tres restantes son de la
+ * Semana 8 y se muestran como explícitamente NO disponibles (`aria-disabled` +
+ * «Próximamente») en lugar de navegar a una pantalla que no existe (decisión 6
+ * del sprint 5).
  *
  * **El bloque de administración va separado en la base y tras el PIN.** El
  * único verificador que el contrato tiene hoy es el del dispositivo
@@ -42,11 +43,11 @@ import { cn } from '@/lib/utils'
  * versión del artefacto; el panel lo dice sin inventar un nombre.
  */
 
-export type NavigationSurface = 'sale' | 'cash-close'
+export type NavigationSurface = 'sale' | 'cash-close' | 'accounts'
 
 /** Un destino del menú, en el orden del §3.1. */
 export interface NavigationDestination {
-  readonly id: NavigationSurface | 'accounts' | 'inventory' | 'waste' | 'attendance'
+  readonly id: NavigationSurface | 'inventory' | 'waste' | 'attendance'
   readonly label: string
   readonly icon: typeof ShoppingBag
 }
@@ -62,7 +63,7 @@ export const NAVIGATION_DESTINATIONS: readonly NavigationDestination[] = [
 
 /** La superficie que el destino abre, o `null` si es de un sprint posterior. */
 function surfaceOf(id: NavigationDestination['id']): NavigationSurface | null {
-  return id === 'sale' || id === 'cash-close' ? id : null
+  return id === 'sale' || id === 'cash-close' || id === 'accounts' ? id : null
 }
 
 /** Motivo visible del rechazo del PIN, con la misma taxonomía del acceso. */

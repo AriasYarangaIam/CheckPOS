@@ -2,6 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { FiadoAccountRow } from '@/db/posDatabase'
 import { CheckoutScreen } from '@/screens/CheckoutScreen'
 
 /*
@@ -17,6 +18,24 @@ const DETAIL: readonly { readonly name: string; readonly lineTotal: number }[] =
 ]
 
 const TOTAL = 2780 // 2720 + 60
+
+/** La cartera local que el cobro recibe para elegir deudor en un toque. */
+const DEBTORS: readonly FiadoAccountRow[] = [
+  {
+    id: 'acct-rosa',
+    name: 'Rosa Quispe',
+    phone: '+51987111222',
+    created_at: '2026-10-26T12:00:00.000Z',
+    updated_at: '2026-10-26T12:00:00.000Z',
+  },
+  {
+    id: 'acct-jose',
+    name: 'José Núñez',
+    phone: null,
+    created_at: '2026-10-26T12:00:00.000Z',
+    updated_at: '2026-10-26T12:00:00.000Z',
+  },
+]
 
 function methodButtons(): HTMLButtonElement[] {
   return ['cash', 'yape', 'plin', 'card', 'other', 'fiado']
@@ -132,13 +151,98 @@ describe('CheckoutScreen', () => {
     const onConfirm = vi.fn()
 
     render(
-      <CheckoutScreen totalCents={TOTAL} lines={DETAIL} onConfirm={onConfirm} />,
+      <CheckoutScreen totalCents={TOTAL} lines={DETAIL} onConfirm={onConfirm} debtors={DEBTORS} />,
     )
 
     fireEvent.click(screen.getByTestId('tender-method-fiado'))
+    fireEvent.click(screen.getByTestId('debtor-option-acct-rosa'))
     fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
 
-    expect(onConfirm).toHaveBeenCalledWith('fiado', 0)
+    expect(onConfirm).toHaveBeenCalledWith('fiado', 0, {
+      id: 'acct-rosa',
+      name: 'Rosa Quispe',
+      phone: '+51987111222',
+      isNew: false,
+    })
+    expect(screen.getByTestId('checkout-received').textContent).toContain('S/ 0.00')
+    expect(screen.getByTestId('checkout-change').textContent).toContain('S/ 0.00')
+  })
+
+  it('does not close a fiado sale without a debtor: the debt needs an owner', () => {
+    const onConfirm = vi.fn()
+
+    render(
+      <CheckoutScreen totalCents={TOTAL} lines={DETAIL} onConfirm={onConfirm} debtors={DEBTORS} />,
+    )
+
+    fireEvent.click(screen.getByTestId('tender-method-fiado'))
+
+    expect(
+      (screen.getByRole('button', { name: 'Finalizar venta' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it('registers a new debtor in two taps, with the optional phone', () => {
+    const onConfirm = vi.fn()
+
+    render(
+      <CheckoutScreen totalCents={TOTAL} lines={DETAIL} onConfirm={onConfirm} debtors={DEBTORS} />,
+    )
+
+    fireEvent.click(screen.getByTestId('tender-method-fiado'))
+    fireEvent.click(screen.getByTestId('debtor-new'))
+    fireEvent.change(screen.getByTestId('debtor-name'), { target: { value: '  Marta Luján  ' } })
+    fireEvent.change(screen.getByTestId('debtor-phone'), { target: { value: ' 987000111 ' } })
+    fireEvent.click(screen.getByTestId('debtor-register'))
+    fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+    const [method, received, debtor] = onConfirm.mock.calls[0] as [
+      string,
+      number,
+      { id: string; name: string; phone: string | null; isNew: boolean },
+    ]
+    expect(method).toBe('fiado')
+    expect(received).toBe(0)
+    expect(debtor.name).toBe('Marta Luján')
+    expect(debtor.phone).toBe('987000111')
+    expect(debtor.isNew).toBe(true)
+    expect(debtor.id).not.toBe('')
+  })
+
+  it('finds the debtor by phone and clears the choice', () => {
+    render(
+      <CheckoutScreen totalCents={TOTAL} lines={DETAIL} onConfirm={() => undefined} debtors={DEBTORS} />,
+    )
+
+    fireEvent.click(screen.getByTestId('tender-method-fiado'))
+    fireEvent.change(screen.getByTestId('debtor-search'), { target: { value: '987111222' } })
+
+    expect(screen.getByTestId('debtor-option-acct-rosa')).toBeTruthy()
+    expect(screen.queryByTestId('debtor-option-acct-jose')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('debtor-option-acct-rosa'))
+    expect(screen.getByTestId('debtor-selected').textContent).toContain('Rosa Quispe')
+
+    fireEvent.click(screen.getByTestId('debtor-change'))
+    expect(screen.getByTestId('debtor-search')).toBeTruthy()
+  })
+
+  it('keeps the non-fiado path unchanged: no debtor on the wire', () => {
+    const onConfirm = vi.fn()
+
+    render(
+      <CheckoutScreen totalCents={TOTAL} lines={DETAIL} onConfirm={onConfirm} debtors={DEBTORS} />,
+    )
+
+    fireEvent.click(screen.getByTestId('tender-method-yape'))
+    fireEvent.click(screen.getByRole('button', { name: 'Finalizar venta' }))
+
+    expect(onConfirm).toHaveBeenCalledWith('yape', TOTAL)
+    expect(screen.queryByTestId('debtor-search')).toBeNull()
   })
 
   it('shows the total first, in the money role', () => {
