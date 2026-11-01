@@ -34,14 +34,17 @@ export const MAX_BACKOFF_MS = 60_000
 export const JITTER_RATIO = 0.3
 
 /**
- * Orden padre → hijo del drenaje (decisión D9): el contrato enumera los POST encolables uno
- * por uno y no define un endpoint de lote, así que el orden se materializa acá. Una venta
- * antes que su anulación, y el cierre de caja al final, sobre el ledger ya confirmado.
+ * Orden padre → hijo del drenaje (decisión D9 del sprint 6, extendida por la decisión 8 del
+ * sprint 7): el contrato enumera los POST encolables uno por uno y no define un endpoint de
+ * lote, así que el orden se materializa acá. Una venta antes que su anulación; el movimiento
+ * de fiado después de la venta a la que se enlaza —referencia `sales(sold_on, sale_id)`—; y el
+ * cierre de caja al final, sobre el ledger ya confirmado.
  */
 const OPERATION_ORDER: Readonly<Record<QueueOperation, number>> = {
   sale: 0,
   void: 1,
-  cash_close: 2,
+  fiado_movement: 2,
+  cash_close: 3,
 }
 
 /**
@@ -85,6 +88,8 @@ export function endpointFor(row: IdempotencyQueueRow): string {
       return '/sales'
     case 'void':
       return `/sales/${row.sale_id ?? ''}/void`
+    case 'fiado_movement':
+      return '/fiado-movements'
     case 'cash_close':
       return '/cash-closes'
   }

@@ -76,7 +76,7 @@ export type QueueStatus = 'pending' | 'in_flight' | 'completed' | 'failed'
  * tiene el camino de la anulación (`POST /sales/{id}/void`, sin superficie de
  * UI todavía).
  */
-export type QueueOperation = 'sale' | 'void' | 'cash_close'
+export type QueueOperation = 'sale' | 'void' | 'fiado_movement' | 'cash_close'
 
 /**
  * Evento pendiente de sincronizar, con la clave de idempotencia que lo cubre.
@@ -164,6 +164,37 @@ export interface CashCloseRow {
   readonly acknowledged: boolean
 }
 
+/**
+ * Cuenta de fiado local: el registro de un deudor (docs/DATABASE.md §4
+ * `fiado_accounts`). NO tiene saldo, ni acá ni en el servidor: el saldo es
+ * `SUM(fiado_movements.amount_cents)` y se computa al leer (decisión 7 del
+ * sprint 7). `updated_at` es la marca de mutación del cliente, el comparador
+ * LWW de §7.4.
+ */
+export interface FiadoAccountRow {
+  readonly id: string
+  readonly name: string
+  readonly phone: string | null
+  readonly created_at: string
+  readonly updated_at: string
+}
+
+/**
+ * Movimiento de fiado local: una fila del ledger firmado (docs/DATABASE.md §4
+ * `fiado_movements`). El signo de `amount_cents` ES el tipo —cargo positivo,
+ * abono negativo— y la fila nunca se edita ni se borra: una anulación escribe
+ * otra fila de signo invertido.
+ */
+export interface FiadoMovementRow {
+  readonly id: string
+  readonly fiado_account_id: string
+  readonly amount_cents: number
+  readonly note: string | null
+  readonly sold_on: string | null
+  readonly sale_id: string | null
+  readonly created_at: string
+}
+
 /** Nombre por defecto de la base. */
 export const POS_DATABASE_NAME = 'pos-saas'
 
@@ -174,6 +205,8 @@ export class PosDatabase extends Dexie {
   idempotency_queue!: Table<IdempotencyQueueRow, string>
   device_session!: Table<DeviceSessionRow, string>
   cash_closes!: Table<CashCloseRow, string>
+  fiado_accounts!: Table<FiadoAccountRow, string>
+  fiado_movements!: Table<FiadoMovementRow, string>
 
   constructor(name: string = POS_DATABASE_NAME) {
     super(name)
@@ -232,6 +265,27 @@ export class PosDatabase extends Dexie {
       idempotency_queue: 'id, key, status, created_at',
       device_session: 'id',
       cash_closes: 'closed_on, id',
+    })
+
+    /*
+     * Versión 4 (W7-FE-1): las dos tiendas del fiado. `fiado_accounts` guarda el
+     * registro del deudor y `fiado_movements` el ledger firmado; ninguna guarda
+     * un saldo —el saldo es la suma de los movimientos y se computa al leer—.
+     * `fiado_account_id` sirve el detalle de una cuenta y `created_at` el orden
+     * del historial.
+     *
+     * Las cinco tiendas anteriores se repiten **idénticas**, con la misma
+     * convención de las versiones 1 a 3: el esquema completo se lee en cada
+     * versión aunque Dexie herede lo que no se repite.
+     */
+    this.version(4).stores({
+      products: 'id, gtin, name, category',
+      cart: 'id, product_id',
+      idempotency_queue: 'id, key, status, created_at',
+      device_session: 'id',
+      cash_closes: 'closed_on, id',
+      fiado_accounts: 'id, name, phone',
+      fiado_movements: 'id, fiado_account_id, created_at',
     })
   }
 }

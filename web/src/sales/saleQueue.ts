@@ -33,7 +33,7 @@ export function subscribeToSaleQueue(listener: SaleQueueListener): () => void {
 }
 
 /** Notifica el cambio a quien relea la cola (badge de pendientes, hook). */
-function notifySaleQueueChanged(): void {
+export function notifySaleQueueChanged(): void {
   for (const listener of listeners) listener()
 }
 
@@ -46,17 +46,17 @@ function notifySaleQueueChanged(): void {
  * un suscriptor que relea la tabla dentro de la transacción vería el estado sin
  * confirmar.
  */
-export async function enqueueSaleClose(
+export function buildSaleQueueRow(
   payload: SaleClosePayload,
   key: string,
-  database: PosDatabase = getPosDatabase(),
-): Promise<IdempotencyQueueRow> {
-  const row: IdempotencyQueueRow = {
+  createdAt: string,
+): IdempotencyQueueRow {
+  return {
     id: crypto.randomUUID(),
     key,
     payload: JSON.stringify(payload),
     status: 'pending',
-    created_at: new Date().toISOString(),
+    created_at: createdAt,
     operation: 'sale',
     // La fecha de negocio viaja en el cuerpo congelado; se copia sin
     // reinterpretar, nunca se re-deriva del reloj (docs/DATABASE.md §4 `sales`).
@@ -66,6 +66,14 @@ export async function enqueueSaleClose(
     total_cents: payload.total_cents,
     last_error: null,
   }
+}
+
+export async function enqueueSaleClose(
+  payload: SaleClosePayload,
+  key: string,
+  database: PosDatabase = getPosDatabase(),
+): Promise<IdempotencyQueueRow> {
+  const row = buildSaleQueueRow(payload, key, new Date().toISOString())
 
   try {
     await database.transaction('rw', database.idempotency_queue, database.cart, async () => {

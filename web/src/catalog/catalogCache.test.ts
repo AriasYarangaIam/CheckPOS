@@ -149,11 +149,14 @@ describe('syncCatalogFromApi', () => {
     // El criterio del sprint sobre la base: solo las tiendas locales.
     // No hay ninguna comunidad para el catálogo global (posDatabase.test.ts
     // ya muerde el negativo; acá se muerde el positivo del cache). W5-FE-2 sumó
-    // el cierre de caja local, que no es catálogo.
+    // el cierre de caja local y W7-FE-1 el registro de deudores con su ledger;
+    // ninguno de los dos es catálogo, y ninguno guarda un saldo.
     expect(database.tables.map((table) => table.name).sort()).toEqual([
       'cart',
       'cash_closes',
       'device_session',
+      'fiado_accounts',
+      'fiado_movements',
       'idempotency_queue',
       'products',
     ])
