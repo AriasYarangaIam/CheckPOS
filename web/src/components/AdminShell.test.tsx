@@ -147,19 +147,6 @@ describe('AdminShell', () => {
     database.close()
   })
 
-  it('announces the destination whose module is not part of this unit, without inventing one', () => {
-    const { database } = renderShell()
-
-    fireEvent.click(screen.getByTestId('admin-destination-catalog'))
-
-    // Catálogo llega en la unidad siguiente: el panel nombra el módulo en lugar de inventar una
-    // superficie de datos.
-    expect(screen.getByTestId('admin-pending').textContent).toContain('Catálogo Maestro')
-    expect(screen.getByTestId('admin-pending').textContent).toContain('todavía no está disponible')
-
-    database.close()
-  })
-
   it('marks the active destination and keeps navigation available offline', async () => {
     Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => false })
     const { database } = renderShell()

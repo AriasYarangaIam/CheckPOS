@@ -6,6 +6,7 @@ import { ConnectivityBadge } from '@/components/ConnectivityBadge'
 import { PendingSyncBadge } from '@/components/PendingSyncBadge'
 import { getPosDatabase, type PosDatabase } from '@/db/posDatabase'
 import { cn } from '@/lib/utils'
+import { AdminCatalogScreen } from '@/screens/AdminCatalogScreen'
 import { AdminDashboardScreen } from '@/screens/AdminDashboardScreen'
 import { AdminInventoryScreen } from '@/screens/AdminInventoryScreen'
 import { AdminWasteScreen } from '@/screens/AdminWasteScreen'
@@ -25,9 +26,8 @@ import { FiadoAccountsScreen } from '@/screens/FiadoAccountsScreen'
  * superficie HTTP y no tiene endpoint de logout, así que el botón borra la fila de
  * `sessionStorage` y nada más: no se inventa una ruta que el contrato no tiene.
  *
- * **Módulos todavía ausentes.** Cinco de los seis destinos tienen su pantalla; Catálogo Maestro
- * llega en la unidad siguiente del sprint y hasta entonces el panel dice la verdad —qué módulo es
- * y que aún no está disponible— en lugar de inventar una pantalla.
+ * **Los seis destinos tienen módulo.** Dashboard, Cierre de caja, Cuentas y Fiados, Inventario,
+ * Mermas y Catálogo son pantallas reales; ninguna queda anunciada como pendiente.
  */
 
 /** Los seis destinos del diseño, en su orden. */
@@ -189,12 +189,7 @@ export function AdminShell({
         ) : destination === 'waste' ? (
           <AdminWasteScreen database={database} initialProductId={wasteProductId} />
         ) : (
-          <div className="mx-auto flex w-full max-w-md flex-col gap-2 p-4" data-testid="admin-pending">
-            <h2 className="text-heading-md font-bold">Catálogo Maestro</h2>
-            <p className="text-body-sm text-text-secondary">
-              Este módulo todavía no está disponible en esta versión.
-            </p>
-          </div>
+          <AdminCatalogScreen database={database} fetchImpl={fetchImpl} token={session.token} />
         )}
       </main>
     </div>
