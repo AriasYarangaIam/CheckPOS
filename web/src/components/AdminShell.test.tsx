@@ -6,8 +6,9 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ADMIN_SESSION_KEY, readAdminSession, saveAdminSession } from '@/auth/accessSession'
-import { AdminShell, ADMIN_DESTINATIONS } from '@/components/AdminShell'
+import { AdminShell } from '@/components/AdminShell'
 import { POS_DATABASE_NAME, PosDatabase } from '@/db/posDatabase'
+import { formatBusinessDate } from '@/sales/saleClose'
 
 /*
  * Shell del rol Administrador (W8-FE-2; docs/FRONTEND.md:48; docs/DESIGN.md:318, :340, :573-645).
@@ -92,7 +93,7 @@ describe('AdminShell', () => {
     database.close()
   })
 
-  it('closes the session on the client, without calling any endpoint', () => {
+  it('closes the session on the client, without calling any endpoint', async () => {
     const onLogout = vi.fn()
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
@@ -104,22 +105,27 @@ describe('AdminShell', () => {
     const footer = screen.getByTestId('admin-session-footer')
     expect(footer.textContent).toContain(SESSION.phone)
 
+    // El dashboard lee la deuda viva al montar; lo que el contrato prohíbe es que el CIERRE DE
+    // SESIÓN llame al servidor: no existe endpoint de logout (`ARCHITECTURE.md:122-135`).
+    await waitFor(() => expect(screen.getByTestId('dashboard-receivable')).toBeTruthy())
+    const callsBeforeLogout = fetchSpy.mock.calls.length
+
     fireEvent.click(screen.getByTestId('admin-logout'))
 
     expect(onLogout).toHaveBeenCalled()
     expect(sessionStorage.getItem(ADMIN_SESSION_KEY)).toBeNull()
     expect(readAdminSession()).toBeNull()
-    // No existe endpoint de cierre de sesión y no se inventa uno (`ARCHITECTURE.md:122-135`).
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(fetchSpy.mock.calls.length).toBe(callsBeforeLogout)
 
     database.close()
   })
 
-  it('opens on the dashboard with the welcome empty state while its module is not built', () => {
+  it('opens on the dashboard, which reads the local ledger', () => {
     const { database } = renderShell()
 
-    // `docs/DESIGN.md:645`: el shell se renderiza con un estado de bienvenida vacío.
-    expect(screen.getByTestId('admin-welcome').textContent).toContain('Selecciona un módulo')
+    // El destino por defecto del diseño es Dashboard / Auditoría y su módulo ya existe: la
+    // pantalla muestra sus KPIs, alimentadas por la proyección local.
+    expect(screen.getByTestId('dashboard-net-sales')).toBeTruthy()
 
     database.close()
   })
@@ -137,20 +143,6 @@ describe('AdminShell', () => {
     expect(
       await within(screen.getByRole('main')).findByRole('heading', { name: 'Cuentas y Fiados' }),
     ).toBeTruthy()
-
-    database.close()
-  })
-
-  it('announces the destinations whose module is not part of this unit, without inventing one', () => {
-    const { database } = renderShell()
-
-    for (const destination of ADMIN_DESTINATIONS) {
-      fireEvent.click(screen.getByTestId(`admin-destination-${destination.id}`))
-
-      if (destination.id === 'dashboard' || destination.id === 'inventory' || destination.id === 'waste' || destination.id === 'catalog') {
-        expect(screen.getByTestId('admin-pending').textContent).toContain(destination.label)
-      }
-    }
 
     database.close()
   })
@@ -175,6 +167,56 @@ describe('AdminShell', () => {
       Reflect.deleteProperty(window.navigator, 'onLine')
       database.close()
     }
+  })
+
+  it('renders the admin cash close with its six rows and the session token', async () => {
+    const database = freshDatabase()
+    render(
+      <AdminShell database={database} onLogout={() => undefined} session={SESSION} />,
+    )
+
+    fireEvent.click(screen.getByTestId('admin-destination-cash-close'))
+
+    // W8-FE-4: las seis filas del CHECK en el arqueo del rol Admin.
+    await waitFor(() =>
+      expect(screen.getAllByTestId(/^cash-close-row-/)).toHaveLength(6),
+    )
+    expect(screen.getByTestId('cash-close-row-fiado')).toBeTruthy()
+
+    // El dueño tiene sesión: el cierre puede pedir el acuse del servidor, así que el aviso de
+    // «sin sesión en línea» no aparece y el CTA queda habilitado.
+    expect(screen.queryByTestId('cash-close-no-session')).toBeNull()
+    expect((screen.getByTestId('cash-close-submit') as HTMLButtonElement).disabled).toBe(false)
+
+    database.close()
+  })
+
+  it('cannot send a close that already exists for the day', async () => {
+    const database = freshDatabase()
+    const today = formatBusinessDate(new Date())
+    await database.cash_closes.put({
+      id: `close-${today}`,
+      closed_on: today,
+      created_at: new Date().toISOString(),
+      counts: JSON.stringify(
+        ['cash', 'yape', 'plin', 'card', 'other', 'fiado'].map((method) => ({
+          payment_method: method,
+          expected_cents: 0,
+          counted_cents: 0,
+          difference_cents: method === 'fiado' ? null : 0,
+        })),
+      ),
+      acknowledged: false,
+    })
+
+    render(<AdminShell database={database} onLogout={() => undefined} session={SESSION} />)
+    fireEvent.click(screen.getByTestId('admin-destination-cash-close'))
+
+    // F37: un cierre ya existente de la fecha abre en solo lectura y no se puede reenviar.
+    expect(await screen.findByTestId('cash-close-readonly')).toBeTruthy()
+    expect(screen.queryByTestId('cash-close-submit')).toBeNull()
+
+    database.close()
   })
 
   it('hands the session token to the fiado wallet so it can restore from the server', async () => {

@@ -260,10 +260,10 @@ administrador. El camino completo está en `internal/identity/admin_login.go`.
 - [x] **T7** W8-DB-2 · Revisión del contrato de esquema contra el checklist (14 tablas, 2 JSONB, 6 tenders, concesiones, append-only) — RUTA: inline. S: S12. Commit: `16892aa`.
 - [x] **T8** W8-FE-1 · Selector de rol y credencial Admin, primer token del cliente en `sessionStorage`; el Empleado sigue por PIN sin token — RUTA: inline (D-C=C2, D-D=D1). S: S2, S13. Commit: `cdb2f6c`.
 - [x] **T9** W8-FE-2 · Shell Admin de 240px con seis destinos y cierre de sesión client-side — RUTA: inline. S: S3. Commit: `58e8337`.
-- [ ] **T10** W8-FE-3 · Dashboard Admin sobre la proyección local más `GET /fiado-accounts` — RUTA: inline (depende de D-E). S: S4, S13, S15.
-- [ ] **T11** W8-FE-4 · Cierre de caja del rol Admin (seis filas, fiado informacional, solo lectura) — RUTA: inline. S: S5.
-- [ ] **T12** W8-FE-5 · Inventario, mermas y catálogo del rol Admin — RUTA: inline. S: S6, S13, S15.
-- [ ] **T13** T-CLOSE · Verificación completa y criterios 1:1 — RUTA: inline. S: S13, S14.
+- [x] **T10** W8-FE-3 · Dashboard Admin sobre la proyección local más `GET /fiado-accounts` — RUTA: inline (D-E). S: S4, S13, S15. Commit: `381d6c0`.
+- [x] **T11** W8-FE-4 · Cierre de caja del rol Admin (seis filas, fiado informacional, solo lectura) — RUTA: inline (verificación: la pantalla venía del Sprint 5). S: S5. Commit: `d9b686b`.
+- [x] **T12** W8-FE-5 · Inventario, mermas y catálogo del rol Admin — RUTA: inline. S: S6, S13, S15. Commits: `d0dc6e0`, `7b183c5`.
+- [x] **T13** T-CLOSE · Verificación completa y criterios 1:1 — RUTA: inline. S: S13, S14. Commit: este documento.
 
 ## Tamaño de la entrega (riesgo de revisión, a la vista)
 
@@ -370,6 +370,76 @@ Pendiente de este sprint (T10–T12): el dashboard, el arqueo del rol Admin y el
 catálogo. Los cuatro destinos que todavía no tienen módulo renderizan un panel honesto que nombra
 el módulo y dice que aún no está disponible; ninguno se inventó ni se dejó en blanco.
 
+## Verificación del bloque T10–T12 (pantallas de datos del rol Admin)
+
+Corrida del bloque (2026-11-01):
+
+- `cd web && npx tsc --noEmit` → exit 0.
+- `cd web && npx vitest run` → **464 pruebas en 51 archivos**, 0 fallos.
+- `go build ./... && go vet ./...` → exit 0 (el bloque no tocó Go).
+- `go test ./... -count=1` → **15 paquetes `ok`, 0 fallos** (corrida del cierre, con PostgreSQL arriba).
+
+Criterio por criterio:
+
+1. **S4 · El dashboard renderiza solo la proyección del ledger local más `GET /fiado-accounts`.**
+   `web/src/dashboard/ledgerProjection.test.ts` (13 pruebas de la proyección) y
+   `web/src/screens/AdminDashboardScreen.test.tsx` (8 pruebas de la pantalla), incluida la que
+   enumera las lecturas de red de la pantalla y exige que sean exactamente `['/fiado-accounts']`:
+   ningún endpoint de reporte existe ni se llama. `docs/BACKEND.md` §4.15 sigue siendo cierto.
+2. **S4 · La deuda de fiado no inventa un número.** Sin sesión o sin red la tarjeta dice «pendiente»
+   y no muestra un importe: cero afirmaría que nadie debe nada, que es distinto de no saberlo.
+3. **S5 · El arqueo del rol Admin son las seis filas con el fiado bloqueado en cero y de solo
+   lectura cuando el cierre existe.** La pantalla venía del Sprint 5 con esas reglas; el bloque
+   agrega la variante Admin en el shell: seis filas con la sesión del dueño, sin el aviso de «sin
+   sesión en línea», y el formulario abierto en solo lectura cuando el día ya tiene cierre, sin
+   botón de envío (F37).
+4. **S6 · La merma encola `POST /stock-adjustments` con un motivo de la lista exacta y sin foto.**
+   `web/src/stock/wasteQueue.test.ts` (cuerpo `source: manual`, `qty_delta` negativo en texto,
+   rechazo de cantidad y motivo inválidos) y `web/src/screens/AdminWasteScreen.test.tsx` (tres
+   motivos exactos, confirmación destructiva antes de escribir, ausencia de todo control de foto,
+   y cero llamadas a `fetch`: funciona sin red).
+5. **S6 · La edición de producto usa `PATCH` y es solo en línea.**
+   `web/src/screens/AdminCatalogScreen.test.tsx`: sin red el guardado está deshabilitado con su
+   motivo visible y no se encola nada; con sesión manda `PATCH /products/{id}` con el token y un
+   cuerpo aditivo que nunca lleva `stock`.
+6. **S6 · La tabla de SKUs y la adopción desde el catálogo global.**
+   La misma prueba cubre las columnas de la tabla y el puntero `global_product_id` cuando la
+   mediación encuentra el GTIN; `web/src/catalog/productQueue.test.ts` fija que el alta no lleva
+   `stock`, que crea la fila local con stock cero y que la adopción viaja como puntero.
+
+Pendiente de este bloque: nada del sprint. T13 cierra el sprint completo.
+
+## Cierre del sprint (T13)
+
+Los trece objetivos del sprint quedan entregados. **La corrida final completa** se registra en la
+sección siguiente; los criterios de aceptación del plan (S13), uno por uno, sobre todo el sprint:
+
+1. **El dashboard Admin renderiza solo la proyección del ledger local más `GET /fiado-accounts`;
+   no se agrega ningún endpoint de reporte ni de agregados.**
+   Evidencia: la prueba de la pantalla enumera las lecturas de red y solo encuentra
+   `/fiado-accounts`; `cmd/api/main.go` no ganó ninguna ruta de reporte en el sprint.
+2. **Un token de empleado no lleva el claim `role` y uno de Admin sí; la ausencia significa
+   empleado.** Evidencia: `internal/identity/admin_login_test.go` (el token emitido tiene
+   `IsAdmin()` verdadero) y `internal/identity/token_test.go` (el camino de empleado sigue sin el
+   claim, y un valor distinto de `admin` no puede circular).
+3. **El `401` del login de administrador es genérico y constante.** Evidencia:
+   `TestAdminLoginAnswersTheSameGeneric401ForEveryFailure` compara el cuerpo de los cuatro caminos
+   byte a byte, y la prueba de integración repite la comparación contra la base real.
+4. **Los tres motivos de merma son exactamente `Vencimiento`, `Rotura en transporte` y
+   `Daño en vitrina`.** Evidencia: `internal/catalog/stock_adjustment_test.go` (el borde los acepta
+   y rechaza las variantes) y `web/src/screens/AdminWasteScreen.test.tsx` (la pantalla ofrece
+   exactamente esos tres).
+5. **La merma no tiene captura de foto en esta versión.** Evidencia: ningún campo en el cuerpo del
+   servidor ni del cliente, y una prueba que exige la ausencia de todo control de foto.
+6. **Ningún rol de runtime puede borrar ni actualizar una fila del ledger.** Evidencia:
+   `internal/platform/postgres/grants_contract_test.go` (matriz de concesiones) y
+   `append_only_contract_test.go` (las cinco tablas rechazan `UPDATE` y `DELETE` con 55006); el
+   sprint no cambió concesiones, y la suite sigue verde.
+
+Definition of Done del plan: el dueño entra con la contraseña maestra del tenant y ve sus propios
+números sin endpoint de reporte; el registro de merma escribe un delta firmado con un motivo de la
+lista exacta; el checklist de esquema se verificó entero sobre las 14 tablas (T7).
+
 ## Log
 
 - **L4** (hueco de contrato resuelto en el login, no inventado): §5.1 exige `user_id` en TODO token, y el dueño no tiene fila propia. La resolución es la que el propio contrato sugiere: el teléfono resuelve primero un `users` (identidad y tenant), y la autoridad administrativa la da la contraseña maestra del tenant. El `user_id` del token es el de la persona cuyo teléfono se usó, así que conocer la contraseña de empleado no convierte a nadie en administrador.
@@ -384,3 +454,7 @@ el módulo y dice que aún no está disponible; ninguno se inventó ni se dejó 
 - **L9** (una sola `h1` por pantalla): el wordmark y el badge de conexión viven en la cabecera del shell, así que el selector de rol lleva su título en `h2` y el shell del administrador usa el nombre del tenant como `h1` de su bloque de marca. Dos `h1` con el mismo texto habrían roto la jerarquía que las pruebas de accesibilidad del shell ya fijan.
 - **L10** (alcance de T9, declarado): el shell monta los seis destinos, pero cuatro de ellos —Dashboard, Inventario, Mermas y Catálogo— todavía no tienen módulo en esta unidad. Renderizan un panel que nombra el módulo y dice que aún no está disponible; no se inventó una superficie de datos ni se dejó una pantalla en blanco. Cada uno se sustituye por su módulo en T10–T12.
 - **L11** (efecto de la sesión): al pasar el token al destino `Cuentas y Fiados`, la restauración del fiado deja de saltearse por falta de sesión. `restoreFiadoAccounts` ya existía; lo que faltaba era el token, y una prueba del shell verifica que el `GET /fiado-accounts` sale con `Bearer` de la sesión.
+- **L12** (umbrales del semáforo, decisión D-I): `docs/FRONTEND.md:52` llama «spec-fixed» a los umbrales del semáforo de stock, pero **ningún documento publica el número** —`docs/DESIGN.md:213` da solo la regla cualitativa (normal, bajo, quiebre)—. Se congela la propuesta mínima y se declara: quiebre en cero o menos, bajo hasta cinco unidades, normal por encima; un stock negativo es quiebre. Queda en el código y en la prueba, no en la prosa.
+- **L13** (la merma mueve la proyección local): al encolarse, la merma descuenta `products.stock` del dispositivo con redondeo a tres decimales. Un semáforo que sigue mostrando mercadería ya dada de baja es peor que no tener semáforo; el acuse y el pull del servidor siguen siendo la verdad final. La venta no hacía esto porque su acuse trae el nivel del servidor en la misma respuesta.
+- **L14** (orden de drenaje del alta): `product` entra a la cola y drena **primero** (§7.8, catálogo antes que ledger): un producto creado en el mismo drenaje tiene que existir antes que la venta que lo referencia. El orden previo —`sale` → `void` → `fiado_movement` → `cash_close` → `stock_adjustment`— se conserva relativo.
+- **L15** (validación del formulario de merma): el botón no se deshabilita con el formulario incompleto; se valida al pulsar y el aviso nombra lo que falta —cantidad o motivo—. Un botón deshabilitado sin explicación deja al operador sin saber qué le pide la pantalla, que es exactamente el tipo de callejón sin salida que el contrato de estados quiere evitar.

@@ -6,6 +6,10 @@ import { ConnectivityBadge } from '@/components/ConnectivityBadge'
 import { PendingSyncBadge } from '@/components/PendingSyncBadge'
 import { getPosDatabase, type PosDatabase } from '@/db/posDatabase'
 import { cn } from '@/lib/utils'
+import { AdminCatalogScreen } from '@/screens/AdminCatalogScreen'
+import { AdminDashboardScreen } from '@/screens/AdminDashboardScreen'
+import { AdminInventoryScreen } from '@/screens/AdminInventoryScreen'
+import { AdminWasteScreen } from '@/screens/AdminWasteScreen'
 import { CashCloseScreen } from '@/screens/CashCloseScreen'
 import { FiadoAccountsScreen } from '@/screens/FiadoAccountsScreen'
 
@@ -22,9 +26,8 @@ import { FiadoAccountsScreen } from '@/screens/FiadoAccountsScreen'
  * superficie HTTP y no tiene endpoint de logout, así que el botón borra la fila de
  * `sessionStorage` y nada más: no se inventa una ruta que el contrato no tiene.
  *
- * **Módulos todavía ausentes.** Tres de los seis destinos tienen su módulo en las unidades
- * siguientes del sprint. Mientras tanto el panel de contenido dice la verdad —qué módulo es y
- * que aún no está disponible— en lugar de inventar una pantalla o de navegar a la nada.
+ * **Los seis destinos tienen módulo.** Dashboard, Cierre de caja, Cuentas y Fiados, Inventario,
+ * Mermas y Catálogo son pantallas reales; ninguna queda anunciada como pendiente.
  */
 
 /** Los seis destinos del diseño, en su orden. */
@@ -68,8 +71,9 @@ export function AdminShell({
 }: AdminShellProps) {
   const [destination, setDestination] = useState<AdminDestinationId>(initialDestination)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-
-  const active = ADMIN_DESTINATIONS.find((entry) => entry.id === destination) ?? ADMIN_DESTINATIONS[0]
+  // El inventario pide la merma de un producto concreto: el shell la lleva al módulo con él
+  // elegido, en lugar de obligar al operador a buscarlo otra vez.
+  const [wasteProductId, setWasteProductId] = useState<string | undefined>(undefined)
 
   function logout(): void {
     // El cierre de sesión es un borrado local: no hay endpoint que llamar.
@@ -164,22 +168,28 @@ export function AdminShell({
       </aside>
 
       <main className="flex-1">
-        {destination === 'cash-close' ? (
+        {destination === 'dashboard' ? (
+          <AdminDashboardScreen
+            database={database}
+            fetchImpl={fetchImpl}
+            token={session.token}
+          />
+        ) : destination === 'cash-close' ? (
           <CashCloseScreen database={database} token={session.token} />
         ) : destination === 'accounts' ? (
           <FiadoAccountsScreen database={database} fetchImpl={fetchImpl} share={share} token={session.token} />
+        ) : destination === 'inventory' ? (
+          <AdminInventoryScreen
+            database={database}
+            onWasteRequested={(productId) => {
+              setWasteProductId(productId)
+              navigate('waste')
+            }}
+          />
+        ) : destination === 'waste' ? (
+          <AdminWasteScreen database={database} initialProductId={wasteProductId} />
         ) : (
-          <div className="mx-auto flex w-full max-w-md flex-col gap-2 p-4" data-testid="admin-pending">
-            {destination === 'dashboard' ? (
-              <p className="text-body-sm text-text-secondary" data-testid="admin-welcome">
-                Selecciona un módulo para comenzar
-              </p>
-            ) : null}
-            <h2 className="text-heading-md font-bold">{active.label}</h2>
-            <p className="text-body-sm text-text-secondary">
-              Este módulo todavía no está disponible en esta versión.
-            </p>
-          </div>
+          <AdminCatalogScreen database={database} fetchImpl={fetchImpl} token={session.token} />
         )}
       </main>
     </div>

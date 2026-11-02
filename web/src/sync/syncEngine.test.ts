@@ -112,13 +112,14 @@ describe('sync engine batching', () => {
     // que existir antes, y el cierre de caja se proyecta sobre el ledger ya
     // confirmado (decisión 8 del sprint 7).
     const fiadoRow = queueRow({ operation: 'fiado_movement', created_at: '2026-10-23T07:00:00.000Z' })
+    // La merma es el sexto POST encolable y drena al final: mueve stock, no dinero.
+    const wasteRow = queueRow({ operation: 'stock_adjustment', created_at: '2026-10-23T06:00:00.000Z' })
+    // El alta de producto drena PRIMERO: catálogo antes que ledger (§7.8).
+    const productRow = queueRow({ operation: 'product', created_at: '2026-10-23T11:00:00.000Z' })
 
-    expect(nextBatch([cashClose, fiadoRow, voidRow, saleRow]).map((row) => row.operation)).toEqual([
-      'sale',
-      'void',
-      'fiado_movement',
-      'cash_close',
-    ])
+    expect(
+      nextBatch([cashClose, wasteRow, fiadoRow, voidRow, saleRow, productRow]).map((row) => row.operation),
+    ).toEqual(['product', 'sale', 'void', 'fiado_movement', 'cash_close', 'stock_adjustment'])
   })
 
   it('posts each queued event to its contract endpoint with its own idempotency key', () => {
@@ -126,6 +127,8 @@ describe('sync engine batching', () => {
     expect(endpointFor(queueRow({ operation: 'void' }))).toBe('/sales/019a0000-0000-7000-8000-000000000001/void')
     expect(endpointFor(queueRow({ operation: 'cash_close' }))).toBe('/cash-closes')
     expect(endpointFor(queueRow({ operation: 'fiado_movement' }))).toBe('/fiado-movements')
+    expect(endpointFor(queueRow({ operation: 'stock_adjustment' }))).toBe('/stock-adjustments')
+    expect(endpointFor(queueRow({ operation: 'product' }))).toBe('/products')
   })
 })
 
