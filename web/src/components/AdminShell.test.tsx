@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ADMIN_SESSION_KEY, readAdminSession, saveAdminSession } from '@/auth/accessSession'
 import { AdminShell, ADMIN_DESTINATIONS } from '@/components/AdminShell'
 import { POS_DATABASE_NAME, PosDatabase } from '@/db/posDatabase'
+import { formatBusinessDate } from '@/sales/saleClose'
 
 /*
  * Shell del rol Administrador (W8-FE-2; docs/FRONTEND.md:48; docs/DESIGN.md:318, :340, :573-645).
@@ -180,6 +181,56 @@ describe('AdminShell', () => {
       Reflect.deleteProperty(window.navigator, 'onLine')
       database.close()
     }
+  })
+
+  it('renders the admin cash close with its six rows and the session token', async () => {
+    const database = freshDatabase()
+    render(
+      <AdminShell database={database} onLogout={() => undefined} session={SESSION} />,
+    )
+
+    fireEvent.click(screen.getByTestId('admin-destination-cash-close'))
+
+    // W8-FE-4: las seis filas del CHECK en el arqueo del rol Admin.
+    await waitFor(() =>
+      expect(screen.getAllByTestId(/^cash-close-row-/)).toHaveLength(6),
+    )
+    expect(screen.getByTestId('cash-close-row-fiado')).toBeTruthy()
+
+    // El dueño tiene sesión: el cierre puede pedir el acuse del servidor, así que el aviso de
+    // «sin sesión en línea» no aparece y el CTA queda habilitado.
+    expect(screen.queryByTestId('cash-close-no-session')).toBeNull()
+    expect((screen.getByTestId('cash-close-submit') as HTMLButtonElement).disabled).toBe(false)
+
+    database.close()
+  })
+
+  it('cannot send a close that already exists for the day', async () => {
+    const database = freshDatabase()
+    const today = formatBusinessDate(new Date())
+    await database.cash_closes.put({
+      id: `close-${today}`,
+      closed_on: today,
+      created_at: new Date().toISOString(),
+      counts: JSON.stringify(
+        ['cash', 'yape', 'plin', 'card', 'other', 'fiado'].map((method) => ({
+          payment_method: method,
+          expected_cents: 0,
+          counted_cents: 0,
+          difference_cents: method === 'fiado' ? null : 0,
+        })),
+      ),
+      acknowledged: false,
+    })
+
+    render(<AdminShell database={database} onLogout={() => undefined} session={SESSION} />)
+    fireEvent.click(screen.getByTestId('admin-destination-cash-close'))
+
+    // F37: un cierre ya existente de la fecha abre en solo lectura y no se puede reenviar.
+    expect(await screen.findByTestId('cash-close-readonly')).toBeTruthy()
+    expect(screen.queryByTestId('cash-close-submit')).toBeNull()
+
+    database.close()
   })
 
   it('hands the session token to the fiado wallet so it can restore from the server', async () => {
