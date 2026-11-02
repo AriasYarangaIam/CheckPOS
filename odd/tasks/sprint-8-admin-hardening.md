@@ -258,8 +258,8 @@ administrador. El camino completo está en `internal/identity/admin_login.go`.
 - [x] **T5** W8-BE-3 · Pin del sobre único y de los `422` de `PATCH`, más los bordes que falten — RUTA: inline. S: S9, S13. Commit: `76de2ec`.
 - [x] **T6** W8-BE-4 · Revisión de logs sin PIN, fotos ni payloads, y canal de la alerta — RUTA: inline. S: S10. Commit: `76de2ec`.
 - [x] **T7** W8-DB-2 · Revisión del contrato de esquema contra el checklist (14 tablas, 2 JSONB, 6 tenders, concesiones, append-only) — RUTA: inline. S: S12. Commit: `16892aa`.
-- [ ] **T8** W8-FE-1 · Selector de rol y credencial Admin, primer token del cliente en `sessionStorage`; el Empleado sigue por PIN sin token — RUTA: inline (D-C=C2, D-D=D1). S: S2, S13.
-- [ ] **T9** W8-FE-2 · Shell Admin de 240px con seis destinos y cierre de sesión client-side — RUTA: inline. S: S3.
+- [x] **T8** W8-FE-1 · Selector de rol y credencial Admin, primer token del cliente en `sessionStorage`; el Empleado sigue por PIN sin token — RUTA: inline (D-C=C2, D-D=D1). S: S2, S13. Commit: `cdb2f6c`.
+- [x] **T9** W8-FE-2 · Shell Admin de 240px con seis destinos y cierre de sesión client-side — RUTA: inline. S: S3. Commit: `58e8337`.
 - [ ] **T10** W8-FE-3 · Dashboard Admin sobre la proyección local más `GET /fiado-accounts` — RUTA: inline (depende de D-E). S: S4, S13, S15.
 - [ ] **T11** W8-FE-4 · Cierre de caja del rol Admin (seis filas, fiado informacional, solo lectura) — RUTA: inline. S: S5.
 - [ ] **T12** W8-FE-5 · Inventario, mermas y catálogo del rol Admin — RUTA: inline. S: S6, S13, S15.
@@ -331,6 +331,45 @@ Pendiente de este sprint (T8–T13): las seis pantallas del rol Admin y el cierr
 de reporte ni de agregados: el dashboard se alimenta solo de la proyección local más
 `GET /fiado-accounts`, así que este bloque no agregó ninguna superficie de datos.
 
+## Verificación del bloque T8–T9 (acceso Admin y shell)
+
+Corrida del bloque (2026-11-01, sin base de datos: el cliente no la necesita):
+
+- `cd web && npx tsc --noEmit` → exit 0.
+- `cd web && npx vitest run` → **408 pruebas en 44 archivos**, 0 fallos.
+
+Criterio por criterio, en lo que este bloque cubre:
+
+1. **S2 · Las dos pantallas renderizan contra `POST /auth/admin-login` y contra `devices.pin_hash`,
+   y no hay datos del tenant antes de autenticar.**
+   `web/src/screens/RoleSelectorScreen.test.tsx` (dos tarjetas, cero campos de credencial, cero
+   datos del local), `web/src/screens/AdminCredentialScreen.test.tsx` (el cuerpo es exactamente
+   `{ phone, master_password }`, sin `Authorization`, y la sesión queda en `sessionStorage`), y
+   `web/src/App.test.tsx` (el camino del empleado sigue entrando por PIN, sin token).
+2. **S2 · El `401` no enumera.** La pantalla muestra una sola frase —«Teléfono o contraseña
+   incorrectos»— y una prueba niega las variantes que insinuarían la causa; un fallo de red se
+   dice como fallo de red, no como credencial inválida.
+3. **S3 · El shell navega los seis destinos.**
+   `web/src/components/AdminShell.test.tsx` verifica las seis etiquetas en el orden del diseño,
+   que «Ajustes de dispositivos» no existe (delta D3), el bloque de marca con `tenant.name`, el
+   badge `Administrador` y que la navegación sigue funcionando con la red caída.
+4. **S3 · El cierre de sesión es del lado del cliente.**
+   La misma prueba guarda una sesión, pulsa el botón y verifica dos cosas: la fila de
+   `sessionStorage` desaparece y **no se llamó a `fetch`** —no hay endpoint de logout y no se
+   inventa uno (`ARCHITECTURE.md:122-135`)—.
+5. **D-C (C2) · La sesión vive en la pestaña.** `web/src/auth/accessSession.test.ts` comprueba que
+   se escribe en `sessionStorage` y **no** en `localStorage`, que la lectura es fail-closed con
+   JSON roto, fila sin token o almacenamiento bloqueado, y que el cierre la borra. `App.test.tsx`
+   verifica la consecuencia práctica: una recarga con la sesión guardada abre el shell sin volver
+   a pedir la contraseña maestra.
+6. **D-D (D1) · Solo el Administrador tiene sesión en línea.** El camino del empleado no cambia:
+   PIN contra `devices.pin_hash`, sin token, y las pruebas existentes de la venta de mostrador y
+   del arqueo siguen verdes después de mover la entrada al selector de rol.
+
+Pendiente de este sprint (T10–T12): el dashboard, el arqueo del rol Admin y el inventario/mermas/
+catálogo. Los cuatro destinos que todavía no tienen módulo renderizan un panel honesto que nombra
+el módulo y dice que aún no está disponible; ninguno se inventó ni se dejó en blanco.
+
 ## Log
 
 - **L4** (hueco de contrato resuelto en el login, no inventado): §5.1 exige `user_id` en TODO token, y el dueño no tiene fila propia. La resolución es la que el propio contrato sugiere: el teléfono resuelve primero un `users` (identidad y tenant), y la autoridad administrativa la da la contraseña maestra del tenant. El `user_id` del token es el de la persona cuyo teléfono se usó, así que conocer la contraseña de empleado no convierte a nadie en administrador.
@@ -341,3 +380,7 @@ de reporte ni de agregados: el dashboard se alimenta solo de la proyección loca
 - **L1** (solicitud del usuario, verbatim): «Me indicas de que trata, ve preparando todo para continuar con el siguiente Sprint y me dejas en claro las dudas abiertas respecto al diseño del software en este sprint.»
 - **L2** (decisiones de diseño, respondidas por el usuario el 2026-10-31): **D-A = A1** (`master_password_hash TEXT NOT NULL` con backfill de hash argon2id aleatorio inutilizable; «tenant sin hash» deja de existir y la divergencia §11.4 #7 queda resuelta sin enmendar el contrato). **D-B = B1** (`cmd/maintenance admin-password`, contraseña por entrada estándar, sin ruta HTTP nueva). **D-C = C2** (token del dueño en `sessionStorage`: sobrevive recargas de la pestaña y muere al cerrarla). **D-D = D1** (solo el Administrador tiene sesión en línea; el Empleado opera offline por PIN, con la consecuencia declarada de que sin sesión de dueño la cola no drena).
 - **L3** (decisiones por recomendación, sin objeción): **D-E** el dashboard cuenta la proyección del ledger local incluyendo los eventos pendientes, con el badge de sincronización existente diciendo qué parte no está confirmada; **D-F** la línea estructurada más la salida no-cero del job de particiones son el canal de operaciones, sin webhook externo.
+- **L8** (límite declarado del shell): por debajo del breakpoint de escritorio la sidebar se apila y se pliega tras un botón, en lugar de convertirse en el drawer de Radix de `docs/DESIGN.md` §6.3. La suite Admin es de escritorio 1440x900 (§7.1) y el shell móvil sigue siendo el del empleado: ninguna pantalla de esta versión necesita ese drawer. Se declara acá en lugar de omitirlo.
+- **L9** (una sola `h1` por pantalla): el wordmark y el badge de conexión viven en la cabecera del shell, así que el selector de rol lleva su título en `h2` y el shell del administrador usa el nombre del tenant como `h1` de su bloque de marca. Dos `h1` con el mismo texto habrían roto la jerarquía que las pruebas de accesibilidad del shell ya fijan.
+- **L10** (alcance de T9, declarado): el shell monta los seis destinos, pero cuatro de ellos —Dashboard, Inventario, Mermas y Catálogo— todavía no tienen módulo en esta unidad. Renderizan un panel que nombra el módulo y dice que aún no está disponible; no se inventó una superficie de datos ni se dejó una pantalla en blanco. Cada uno se sustituye por su módulo en T10–T12.
+- **L11** (efecto de la sesión): al pasar el token al destino `Cuentas y Fiados`, la restauración del fiado deja de saltearse por falta de sesión. `restoreFiadoAccounts` ya existía; lo que faltaba era el token, y una prueba del shell verifica que el `GET /fiado-accounts` sale con `Bearer` de la sesión.

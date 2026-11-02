@@ -1,13 +1,17 @@
 import { Menu } from 'lucide-react'
 import { useState } from 'react'
 
+import { readAdminSession, type AdminSession } from '@/auth/accessSession'
+import { AdminShell } from '@/components/AdminShell'
 import { ConnectivityBadge } from '@/components/ConnectivityBadge'
 import { NavigationSheet, type NavigationSurface } from '@/components/NavigationSheet'
 import { PendingSyncBadge } from '@/components/PendingSyncBadge'
 import { CashCloseScreen } from '@/screens/CashCloseScreen'
+import { AdminCredentialScreen } from '@/screens/AdminCredentialScreen'
 import { CounterSaleScreen } from '@/screens/CounterSaleScreen'
 import { EmployeeAccessScreen } from '@/screens/EmployeeAccessScreen'
 import { FiadoAccountsScreen } from '@/screens/FiadoAccountsScreen'
+import { RoleSelectorScreen } from '@/screens/RoleSelectorScreen'
 
 /**
  * Shell de la PWA. Su entrada es la pantalla de acceso del empleado
@@ -36,10 +40,39 @@ import { FiadoAccountsScreen } from '@/screens/FiadoAccountsScreen'
  * venta y el fiado cierran localmente, el cierre de caja espera el acuse y la
  * restauración del fiado se saltea sin sesión.
  */
+/**
+ * La pantalla en la que está la aplicación. Son cinco y no hay una sexta: el selector de rol, la
+ * credencial del empleado (PIN) y la del administrador (teléfono + contraseña maestra) son las
+ * puertas; el shell del empleado y el del administrador son las dos operaciones.
+ *
+ * **La sesión del dueño se reanuda al montar.** El token vive en `sessionStorage` (decisión
+ * D-C = C2 del sprint 8), así que recargar la pestaña durante el turno no obliga a reescribir la
+ * contraseña maestra. El empleado no tiene token en línea (decisión D-D = D1): su sesión es el
+ * PIN contra `devices.pin_hash` y no sobrevive a una recarga.
+ */
+type AppScreen =
+  | { readonly kind: 'role' }
+  | { readonly kind: 'employee-credential' }
+  | { readonly kind: 'employee' }
+  | { readonly kind: 'admin-credential' }
+  | { readonly kind: 'admin'; readonly session: AdminSession }
+
 export function App() {
-  const [unlocked, setUnlocked] = useState(false)
+  const [screen, setScreen] = useState<AppScreen>(() => {
+    const stored = readAdminSession()
+
+    return stored === null ? { kind: 'role' } : { kind: 'admin', session: stored }
+  })
   const [surface, setSurface] = useState<NavigationSurface>('sale')
   const [menuOpen, setMenuOpen] = useState(false)
+
+  // El shell del administrador trae su propio chrome —sidebar, marca, footer de sesión—, así que
+  // la cabecera del shell del empleado no se renderiza encima.
+  if (screen.kind === 'admin') {
+    return <AdminShell session={screen.session} onLogout={() => setScreen({ kind: 'role' })} />
+  }
+
+  const unlocked = screen.kind === 'employee'
 
   return (
     <div className="flex min-h-screen flex-col bg-surface-bg text-text-primary">
@@ -67,7 +100,18 @@ export function App() {
         </div>
       </header>
       <main className="flex-1">
-        {unlocked ? (
+        {screen.kind === 'role' ? (
+          <RoleSelectorScreen
+            onSelect={(role) =>
+              setScreen({ kind: role === 'employee' ? 'employee-credential' : 'admin-credential' })
+            }
+          />
+        ) : screen.kind === 'admin-credential' ? (
+          <AdminCredentialScreen
+            onAuthenticated={(session) => setScreen({ kind: 'admin', session })}
+            onBack={() => setScreen({ kind: 'role' })}
+          />
+        ) : unlocked ? (
           surface === 'cash-close' ? (
             <CashCloseScreen onBack={() => setSurface('sale')} />
           ) : surface === 'accounts' ? (
@@ -76,7 +120,7 @@ export function App() {
             <CounterSaleScreen />
           )
         ) : (
-          <EmployeeAccessScreen onUnlocked={() => setUnlocked(true)} />
+          <EmployeeAccessScreen onUnlocked={() => setScreen({ kind: 'employee' })} />
         )}
       </main>
       {unlocked ? (
