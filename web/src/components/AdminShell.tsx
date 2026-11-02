@@ -6,6 +6,7 @@ import { ConnectivityBadge } from '@/components/ConnectivityBadge'
 import { PendingSyncBadge } from '@/components/PendingSyncBadge'
 import { getPosDatabase, type PosDatabase } from '@/db/posDatabase'
 import { cn } from '@/lib/utils'
+import { AdminDashboardScreen } from '@/screens/AdminDashboardScreen'
 import { CashCloseScreen } from '@/screens/CashCloseScreen'
 import { FiadoAccountsScreen } from '@/screens/FiadoAccountsScreen'
 
@@ -22,9 +23,10 @@ import { FiadoAccountsScreen } from '@/screens/FiadoAccountsScreen'
  * superficie HTTP y no tiene endpoint de logout, así que el botón borra la fila de
  * `sessionStorage` y nada más: no se inventa una ruta que el contrato no tiene.
  *
- * **Módulos todavía ausentes.** Tres de los seis destinos tienen su módulo en las unidades
- * siguientes del sprint. Mientras tanto el panel de contenido dice la verdad —qué módulo es y
- * que aún no está disponible— en lugar de inventar una pantalla o de navegar a la nada.
+ * **Módulos todavía ausentes.** Tres de los seis destinos —Inventario, Mermas y Catálogo— tienen
+ * su módulo en la unidad siguiente del sprint. Mientras tanto el panel de contenido dice la
+ * verdad —qué módulo es y que aún no está disponible— en lugar de inventar una pantalla o de
+ * navegar a la nada.
  */
 
 /** Los seis destinos del diseño, en su orden. */
@@ -164,17 +166,18 @@ export function AdminShell({
       </aside>
 
       <main className="flex-1">
-        {destination === 'cash-close' ? (
+        {destination === 'dashboard' ? (
+          <AdminDashboardScreen
+            database={database}
+            fetchImpl={fetchImpl}
+            token={session.token}
+          />
+        ) : destination === 'cash-close' ? (
           <CashCloseScreen database={database} token={session.token} />
         ) : destination === 'accounts' ? (
           <FiadoAccountsScreen database={database} fetchImpl={fetchImpl} share={share} token={session.token} />
         ) : (
           <div className="mx-auto flex w-full max-w-md flex-col gap-2 p-4" data-testid="admin-pending">
-            {destination === 'dashboard' ? (
-              <p className="text-body-sm text-text-secondary" data-testid="admin-welcome">
-                Selecciona un módulo para comenzar
-              </p>
-            ) : null}
             <h2 className="text-heading-md font-bold">{active.label}</h2>
             <p className="text-body-sm text-text-secondary">
               Este módulo todavía no está disponible en esta versión.

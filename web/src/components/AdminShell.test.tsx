@@ -92,7 +92,7 @@ describe('AdminShell', () => {
     database.close()
   })
 
-  it('closes the session on the client, without calling any endpoint', () => {
+  it('closes the session on the client, without calling any endpoint', async () => {
     const onLogout = vi.fn()
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
@@ -104,22 +104,27 @@ describe('AdminShell', () => {
     const footer = screen.getByTestId('admin-session-footer')
     expect(footer.textContent).toContain(SESSION.phone)
 
+    // El dashboard lee la deuda viva al montar; lo que el contrato prohíbe es que el CIERRE DE
+    // SESIÓN llame al servidor: no existe endpoint de logout (`ARCHITECTURE.md:122-135`).
+    await waitFor(() => expect(screen.getByTestId('dashboard-receivable')).toBeTruthy())
+    const callsBeforeLogout = fetchSpy.mock.calls.length
+
     fireEvent.click(screen.getByTestId('admin-logout'))
 
     expect(onLogout).toHaveBeenCalled()
     expect(sessionStorage.getItem(ADMIN_SESSION_KEY)).toBeNull()
     expect(readAdminSession()).toBeNull()
-    // No existe endpoint de cierre de sesión y no se inventa uno (`ARCHITECTURE.md:122-135`).
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(fetchSpy.mock.calls.length).toBe(callsBeforeLogout)
 
     database.close()
   })
 
-  it('opens on the dashboard with the welcome empty state while its module is not built', () => {
+  it('opens on the dashboard, which reads the local ledger', () => {
     const { database } = renderShell()
 
-    // `docs/DESIGN.md:645`: el shell se renderiza con un estado de bienvenida vacío.
-    expect(screen.getByTestId('admin-welcome').textContent).toContain('Selecciona un módulo')
+    // El destino por defecto del diseño es Dashboard / Auditoría y su módulo ya existe: la
+    // pantalla muestra sus KPIs, alimentadas por la proyección local.
+    expect(screen.getByTestId('dashboard-net-sales')).toBeTruthy()
 
     database.close()
   })
@@ -147,7 +152,7 @@ describe('AdminShell', () => {
     for (const destination of ADMIN_DESTINATIONS) {
       fireEvent.click(screen.getByTestId(`admin-destination-${destination.id}`))
 
-      if (destination.id === 'dashboard' || destination.id === 'inventory' || destination.id === 'waste' || destination.id === 'catalog') {
+      if (destination.id === 'inventory' || destination.id === 'waste' || destination.id === 'catalog') {
         expect(screen.getByTestId('admin-pending').textContent).toContain(destination.label)
       }
     }
