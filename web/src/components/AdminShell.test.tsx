@@ -6,7 +6,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ADMIN_SESSION_KEY, readAdminSession, saveAdminSession } from '@/auth/accessSession'
-import { AdminShell, ADMIN_DESTINATIONS } from '@/components/AdminShell'
+import { AdminShell } from '@/components/AdminShell'
 import { POS_DATABASE_NAME, PosDatabase } from '@/db/posDatabase'
 import { formatBusinessDate } from '@/sales/saleClose'
 
@@ -147,16 +147,15 @@ describe('AdminShell', () => {
     database.close()
   })
 
-  it('announces the destinations whose module is not part of this unit, without inventing one', () => {
+  it('announces the destination whose module is not part of this unit, without inventing one', () => {
     const { database } = renderShell()
 
-    for (const destination of ADMIN_DESTINATIONS) {
-      fireEvent.click(screen.getByTestId(`admin-destination-${destination.id}`))
+    fireEvent.click(screen.getByTestId('admin-destination-catalog'))
 
-      if (destination.id === 'inventory' || destination.id === 'waste' || destination.id === 'catalog') {
-        expect(screen.getByTestId('admin-pending').textContent).toContain(destination.label)
-      }
-    }
+    // Catálogo llega en la unidad siguiente: el panel nombra el módulo en lugar de inventar una
+    // superficie de datos.
+    expect(screen.getByTestId('admin-pending').textContent).toContain('Catálogo Maestro')
+    expect(screen.getByTestId('admin-pending').textContent).toContain('todavía no está disponible')
 
     database.close()
   })
