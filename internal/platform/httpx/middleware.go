@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/logging"
+	"github.com/AriasYarangaIam/CheckPOS/internal/platform/metrics"
 )
 
 // RequestIDHeader es la cabecera por la que viaja el identificador de petición, hacia
@@ -39,6 +40,13 @@ func WithRoutes(mount func(*http.ServeMux)) Option {
 // transporte (docs/BACKEND.md §10.1). Sprint 2 usa esa costura para `POST /auth/login`: sin
 // opciones, el router es exactamente el de antes.
 func NewRouter(logger *slog.Logger, checker ReadinessChecker, options ...Option) http.Handler {
+	return NewRouterWithMetrics(logger, checker, nil, options...)
+}
+
+// NewRouterWithMetrics arma el mismo servidor y además registra la latencia de cada ruta de
+// negocio (Sprint 9, W9-BE-1). Sin registro —el caso de NewRouter— se comporta exactamente
+// como antes: el middleware se retira y no se monta `/metrics`.
+func NewRouterWithMetrics(logger *slog.Logger, checker ReadinessChecker, registry *metrics.Registry, options ...Option) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", HealthHandler())
 	mux.Handle("GET /readyz", ReadinessHandler(checker))
@@ -50,7 +58,7 @@ func NewRouter(logger *slog.Logger, checker ReadinessChecker, options ...Option)
 	// El patrón "/" es el fallback de todo lo que no coincida arriba.
 	mux.Handle("/", NotFoundHandler())
 
-	return RequestLogging(logger, mux)
+	return RequestLogging(logger, RequestMetrics(registry, mux))
 }
 
 // RequestLogging registra una línea por petición y propaga el identificador de petición.
