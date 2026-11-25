@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { Money } from '@/components/Money'
+import { PerformanceCard } from '@/components/PerformanceCard'
 import { getPosDatabase, type CashCloseRow, type IdempotencyQueueRow, type PosDatabase } from '@/db/posDatabase'
 import {
   projectLedger,
@@ -245,6 +246,7 @@ export function AdminDashboardScreen({
           La diferencia del fiado es informacional y nunca se cuenta como faltante.
         </p>
       </article>
+      <PerformanceCard database={database} />
     </section>
   )
 }

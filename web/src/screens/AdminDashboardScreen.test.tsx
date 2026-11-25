@@ -270,4 +270,16 @@ describe('AdminDashboardScreen', () => {
       database.close()
     }
   })
+
+  it('mounts the device performance card next to the owner numbers', async () => {
+    const database = freshDatabase()
+
+    try {
+      renderDashboard(database)
+
+      expect(await screen.findByText('Desempeño del dispositivo')).toBeTruthy()
+    } finally {
+      database.close()
+    }
+  })
 })

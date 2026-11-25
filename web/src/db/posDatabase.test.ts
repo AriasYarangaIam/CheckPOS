@@ -159,6 +159,10 @@ const DECLARED_STORES: readonly {
   // Versión 4 (W7-FE-1): el ledger firmado local. `fiado_account_id` sirve el
   // detalle de una cuenta y `created_at` el orden del historial.
   { table: 'fiado_movements', primaryKey: 'id', indexes: ['fiado_account_id', 'created_at'] },
+  // Versión 5 (W9-BE-1): muestras de desempeño del dispositivo. La clave es un
+  // autoincremento local y `kind` separa las dos mediciones; `recorded_at` ordena
+  // la exportación de la bitácora del piloto.
+  { table: 'performance_samples', primaryKey: 'id', indexes: ['kind', 'recorded_at'] },
 ]
 
 /** Clave primaria y caminos de índice declarados, tabla por tabla. */
@@ -214,6 +218,7 @@ describe('PosDatabase schema', () => {
       'fiado_accounts',
       'fiado_movements',
       'idempotency_queue',
+      'performance_samples',
       'products',
     ])
 
@@ -433,7 +438,7 @@ describe('PosDatabase schema upgrade', () => {
     try {
       await upgraded.open()
 
-      expect(upgraded.verno).toBe(4)
+      expect(upgraded.verno).toBe(5)
       expect(await upgraded.products.get('prod-1')).toEqual(LOCAL_PRODUCT)
       expect(await upgraded.cart.orderBy('id').toArray()).toEqual(CART_LINES)
       expect(await upgraded.idempotency_queue.orderBy('id').toArray()).toEqual(QUEUED_EVENTS)
@@ -441,7 +446,7 @@ describe('PosDatabase schema upgrade', () => {
       // Las tiendas nuevas existen y arrancan vacías: migrar no inventa una
       // sesión ni un cierre.
       expect(upgraded.tables.map((table) => table.name).sort()).toEqual(
-        expect.arrayContaining(['cash_closes', 'device_session']),
+        expect.arrayContaining(['cash_closes', 'device_session', 'performance_samples']),
       )
       expect(await upgraded.device_session.count()).toBe(0)
       expect(await upgraded.cash_closes.count()).toBe(0)
