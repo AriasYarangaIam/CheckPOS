@@ -48,14 +48,14 @@ Son dos cosas distintas y el plan gratuito solo tiene una:
 
 | Concepto | Qué es | Plan gratuito |
 | :--- | :--- | :--- |
-| **Respaldo cloud diario** | Una copia programada que permite **restaurar** la base a un punto anterior | **No** — es una capacidad del plan Estándar (`docs/BUSINESS.md:50`) |
+| **Respaldo cloud diario** | Una copia programada que permite **restaurar** la base a un punto anterior | **No** — es una capacidad del plan Estándar (`docs/BUSINESS.md:50`). El respaldo operativo del piloto (§6) lo ejecuta el equipo con los comandos del repositorio y no se vende como capacidad del plan |
 | **El ledger en PostgreSQL** | El registro append-only del servidor: `sales`, `sale_lines`, `stock_adjustments`, `cash_closes`, `cash_close_counts` (`docs/DATABASE.md` §4) | **Sí** — es donde el servidor escribe cada venta confirmada |
 
-En el plan gratuito, entonces, **el servidor es la única copia durable y no hay una segunda
-copia**. Que la venta sobreviva a la pérdida del teléfono no viene de un respaldo: viene de
-que la fila ya está en el ledger del servidor. Y si esa base se perdiera, el plan gratuito no
-tiene mecanismo de restauración; la política de respaldo y PITR está declarada `(propuesta)`
-y **no** fijada por las fuentes (`docs/BACKEND.md` §7.8).
+En el plan gratuito, entonces, **el servidor es la única copia durable y no hay una segunda copia**. Que la venta sobreviva a la pérdida del teléfono no viene de un respaldo: viene de
+que la fila ya está en el ledger del servidor. La operación del piloto sí tiene respaldo lógico
+verificado y su ensayo de restauración (§6), pero eso no convierte el respaldo en una capacidad
+del plan gratuito: es una obligación operativa del equipo durante el piloto. La recuperación a un
+punto en el tiempo sigue declarada `(propuesta)` y depende de la infraestructura (§6.4).
 
 ---
 
@@ -101,9 +101,10 @@ dispositivo (`ARCHITECTURE.md:168`).
 | Dispositivo y ventana offline (bind) | **Implementado** | `docs/BACKEND.md` §4.3 |
 | Catálogo del tenant (`GET /products`) | **Implementado** — es una lectura completa del catálogo del tenant, sin volcado global | `docs/BACKEND.md` §4.5 |
 | Venta, anulación y cierre de caja (escritura) | **Implementado** | `docs/BACKEND.md` §4.9, §4.10, §4.13 |
-| Descarga incremental del catálogo y perfiles (`GET /sync/cursor`) | **Pendiente: Sprint 6.** Además, el cursor **no transporta dinero ni stock**: solo ediciones de catálogo y perfil | `docs/BACKEND.md` §4.8; `docs/DATABASE.md` §7.3 |
+| Descarga incremental del catálogo y perfiles (`GET /sync/cursor`) | **Implementado** (Sprint 6). Además, el cursor **no transporta dinero ni stock**: solo ediciones de catálogo y perfil | `docs/BACKEND.md` §4.8; `docs/DATABASE.md` §7.3 |
 | Re-descarga del historial de ventas | **No existe en esta versión.** No hay `GET /sales` ni endpoint de reporte agregado | `docs/BACKEND.md` §4.15, §11.3 |
-| Cuentas de fiado (`GET /fiado-accounts`) | **Pendiente: Sprint 7** | `docs/BACKEND.md` §4.12 |
+| Cuentas de fiado (`GET /fiado-accounts`) | **Implementado** (Sprint 7) | `docs/BACKEND.md` §4.12 |
+| Respaldo lógico y ensayo de restauración | **Implementado** (Sprint 9): `maintenance backup` y `maintenance restore-verify` | §6 de este documento |
 
 Conclusión operativa, sin adornos: tras el re-login y el bind, **el historial no se pierde
 porque ya está en el servidor, pero esta versión no tiene todavía un camino para volver a
@@ -172,7 +173,135 @@ volver.
 
 ---
 
-## 5. Referencias
+## 6. Respaldo y recuperación operativa (Sprint 9, W9-DB-1)
+
+Este bloque agrega la capacidad que §1.3 daba por inexistente: una **instantánea lógica
+diaria** con manifiesto y un **ensayo de restauración ejecutable**. El alcance es deliberado y
+su límite se declara aquí, no se esconde.
+
+### 6.1 Qué entrega este bloque y qué no
+
+| Capacidad | Estado |
+| :--- | :--- |
+| Instantánea lógica diaria (`pg_dump -Fc`) con manifiesto JSON | **Implementada** — `maintenance backup --dir <path>` |
+| Huella del dump (sha256), tamaño, base, rol, huella del esquema y conteos de las 14 tablas | **Implementado** — el manifiesto es el contrato del ensayo |
+| Ensayo de restauración en base desechable, con comparación y limpieza | **Implementado** — `maintenance restore-verify --file <manifest> --scratch <pos_restore_*>` |
+| Retención de respaldos alineada a la ventana de claims | **Declarada** — §6.3 |
+| Archivado continuo de WAL y recuperación a un punto en el tiempo (PITR) | **No implementado en `docker-compose.yml`** — capacidad de infraestructura, ver §6.4 |
+
+Los binarios de PostgreSQL se ejecutan **dentro del contenedor** (`docker compose exec -T
+postgres …`): este host de desarrollo no tiene cliente instalado. `BACKUP_DOCKER_SERVICE`,
+`PG_DUMP`, `PG_RESTORE` y `PSQL` permiten apuntar a un host con cliente real.
+
+### 6.2 Instantánea diaria programada
+
+El respaldo usa el DSN de migración (`DATABASE_URL`), que es el rol dueño: un respaldo lógico
+necesita leer todas las tablas, y `pos_app`/`pos_auth` no pueden. Una vez al día, en horario de
+baja venta:
+
+```bash
+go run ./cmd/maintenance backup --dir /var/backups/pos
+```
+
+Salida: `YYYYMMDDTHHMMSSZ-<base>.dump` y su `…manifest.json` en el mismo directorio. El comando
+imprime el manifiesto como JSON, y un fallo deja salida no cero y **borra el dump parcial**: un
+respaldo truncado con nombre válido es peor que ninguno.
+
+- **Linux (cron):** `15 3 * * * cd /srv/checkpos && /usr/local/go/bin/go run ./cmd/maintenance backup --dir /var/backups/pos >> /var/log/checkpos-backup.log 2>&1`
+- **Windows (Programador de tareas):** acción diaria a las 03:15 que ejecuta
+  `go run ./cmd/maintenance backup --dir D:\backups\pos`, con «Iniciar sesión solo si el usuario
+  está conectado» desmarcado para que corra sin sesión interactiva.
+
+### 6.3 Retención alineada a los claims
+
+La retención de `idempotency_keys` es de 400 días (`maintenance.RetentionWindow`,
+`docs/DATABASE.md` §6.3). Un respaldo tiene que cubrir al menos esa ventana completa: si el
+respaldo más viejo es más nuevo que la retención, una restauración perdería claims que el
+servidor todavía considera válidos.
+
+- Conservar **todas** las instantáneas diarias durante 400 días y, a partir de ahí, una por mes
+  hasta los 13 meses (margen de 30 días para el desfase de calendario).
+- El manifiesto se conserva junto al dump mientras viva el dump: sin manifiesto el ensayo no
+  puede comparar y el respaldo deja de ser verificable.
+
+### 6.4 Archivado continuo y PITR: capacidad de infraestructura
+
+La recuperación a un punto en el tiempo exige que el motor archive WAL de forma continua. El
+`docker-compose.yml` de desarrollo **no** lo configura, y este bloque no lo simula: sin
+`archive_mode` no hay PITR, y fingirlo en local sería peor que declararlo.
+
+Configuración mínima de producción (fuera de este repositorio):
+
+```conf
+wal_level = replica
+archive_mode = on
+archive_timeout = 300
+archive_command = 'test ! -f /var/lib/postgresql/wal-archive/%f && cp %p /var/lib/postgresql/wal-archive/%f'
+```
+
+Con eso, la operación semanal es un `pg_basebackup` (base + WAL) y la recuperación se hace
+restaurando la base y arrancando el motor con:
+
+```conf
+restore_command = 'cp /var/lib/postgresql/wal-archive/%f %p'
+recovery_target_time = '2026-11-24 18:00:00+00'
+recovery_target_action = 'promote'
+```
+
+**Límite declarado:** este repositorio entrega la instantánea diaria verificable y su ensayo;
+el archivado continuo, la retención del WAL y el objetivo de recuperación son responsabilidad de
+la infraestructura del piloto. Ninguna afirmación de este documento dice que el PITR esté
+probado, porque no lo está.
+
+### 6.5 Ensayo de restauración
+
+Dentro de la ventana del piloto, y una vez al mes después, se ejecuta un ensayo real contra la
+última instantánea:
+
+```bash
+go run ./cmd/maintenance restore-verify \
+  --file /var/backups/pos/20261125T031500Z-pos.manifest.json \
+  --scratch pos_restore_pilot_20261125
+```
+
+Qué hace, en orden:
+
+1. Lee el manifiesto y rechaza un `--scratch` que no empiece con `pos_restore_`.
+2. Verifica el **sha256** del dump contra el manifiesto: un dump alterado no se restaura.
+3. Crea la base desechable, restaura con `pg_restore` y compara la **huella del esquema** y los
+   **conteos de las 14 tablas** contra el manifiesto.
+4. **Borra la base desechable siempre**, incluso si la restauración falla. Si el borrado falla,
+   el ensayo falla: una base `pos_restore_*` viva no es un detalle cosmético.
+
+Sale con JSON (`dump_file`, `scratch_database`, `restored`, `schema_match`, `row_count_match`,
+`tables_verified`, `mismatches`, `dropped`) y con código no cero ante cualquier diferencia.
+Nunca abre la base de origen para escribir.
+
+### 6.6 Registro del ensayo (evidencia del piloto)
+
+Cada ejecución se anota en la bitácora del piloto con esta forma; el criterio de W9-DB-1 es que
+el ensayo quede **ejecutado y registrado**, no que el comando exista:
+
+| Campo | Ejemplo |
+| :--- | :--- |
+| Fecha y hora (UTC) | 2026-11-25T03:20:00Z |
+| Dump y manifiesto | `20261125T031500Z-pos.dump` / `.manifest.json` |
+| SHA-256 del dump | el del manifiesto |
+| Tablas verificadas | 14 de 14 |
+| Resultado | `schema_match=true`, `row_count_match=true`, `dropped=true` |
+| Operador | quien ejecutó el ensayo |
+
+### 6.7 Lo que este bloque no hace
+
+- No programa el respaldo por sí mismo: el comando se agenda en el sistema operativo (§6.2).
+- No configura `archive_mode` ni prueba PITR (§6.4).
+- No restaura sobre la base de origen: el ensayo es siempre sobre una base desechable.
+- No sustituye la prueba de borrado y reinstalación del dispositivo (§4): aquella mide el
+  cliente, esta mide la copia durable del servidor.
+
+---
+
+## 7. Referencias
 
 - `ARCHITECTURE.md:41` — el cierre de caja es una proyección del ledger, nunca un segundo
   total corriente.
