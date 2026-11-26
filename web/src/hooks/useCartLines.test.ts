@@ -70,3 +70,17 @@ describe('useCartLines', () => {
     database.close()
   })
 })
+
+describe('useCartLines con la lectura local fallando', () => {
+  it('keeps the honest empty cart and never escapes the rejection', () => {
+    // Una base cerrada es el fallo real de IndexedDB: la lectura rechaza con
+    // DatabaseClosedError y esa cadena no puede quedar sin manejar.
+    const database = freshDatabase()
+    database.close()
+
+    const { result, unmount } = renderHook(() => useCartLines(database))
+
+    expect(result.current).toEqual([])
+    unmount()
+  })
+})

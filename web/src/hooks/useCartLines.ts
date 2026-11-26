@@ -24,9 +24,14 @@ export function useCartLines(database: PosDatabase = getPosDatabase()): readonly
   useEffect(() => {
     let live = true
 
-    void database.cart.toArray().then((rows) => {
-      if (live) setLines(rows)
-    })
+    void database.cart.toArray()
+      .then((rows) => {
+        if (live) setLines(rows)
+      })
+      .catch(() => {
+        // Sin IndexedDB no hay carrito leído: se conserva el estado vacío honesto
+        // y el rechazo no se escapa como un error no controlado.
+      })
 
     return () => {
       live = false

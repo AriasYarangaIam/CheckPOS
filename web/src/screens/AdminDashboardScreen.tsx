@@ -78,12 +78,17 @@ export function AdminDashboardScreen({
     void Promise.all([
       database.idempotency_queue.toArray(),
       database.cash_closes.toArray(),
-    ]).then(([events, closes]: [IdempotencyQueueRow[], CashCloseRow[]]) => {
-      if (!live) return
+    ])
+      .then(([events, closes]: [IdempotencyQueueRow[], CashCloseRow[]]) => {
+        if (!live) return
 
-      setProjection(projectLedger(events, closes, formatBusinessDate(now())))
-      setLoaded(true)
-    })
+        setProjection(projectLedger(events, closes, formatBusinessDate(now())))
+        setLoaded(true)
+      })
+      .catch(() => {
+        // Sin ledger local no hay números: los KPIs quedan en el guion honesto y la
+        // lectura fallida no se escapa como un rechazo no controlado.
+      })
 
     return () => {
       live = false
@@ -93,9 +98,13 @@ export function AdminDashboardScreen({
   useEffect(() => {
     let live = true
 
-    void readReceivable({ token, isOnline, fetchImpl, baseUrl }).then((read) => {
-      if (live) setReceivable(read)
-    })
+    void readReceivable({ token, isOnline, fetchImpl, baseUrl })
+      .then((read) => {
+        if (live) setReceivable(read)
+      })
+      .catch(() => {
+        // La deuda de fiado es informativa: sin lectura queda «pendiente» y nada escapa.
+      })
 
     return () => {
       live = false

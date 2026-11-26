@@ -125,6 +125,10 @@ export function FiadoAccountsScreen({
             : 'La cartera no se pudo restaurar. La copia del dispositivo sigue disponible.',
       )
       reload()
+    } catch {
+      // Una restauración que revienta —base local caída, red a medias— informa con la
+      // misma frase honesta del desenlace «no restaurado»: nada se escapa sin manejar.
+      setNotice('La cartera no se pudo restaurar. La copia del dispositivo sigue disponible.')
     } finally {
       setRestoring(false)
     }
@@ -139,14 +143,18 @@ export function FiadoAccountsScreen({
         `${movement.created_at.slice(0, 10)}  ${(movement.amount_cents / 100).toFixed(2)}${movement.note === null ? '' : `  ${movement.note}`}`,
     )
 
-    await share({
-      title: `Estado de cuenta · ${selected.name}`,
-      text: [
-        `Estado de cuenta · ${selected.name}`,
-        ...lines,
-        `Saldo: ${(accountBalanceCents(movements) / 100).toFixed(2)}`,
-      ].join('\n'),
-    })
+    try {
+      await share({
+        title: `Estado de cuenta · ${selected.name}`,
+        text: [
+          `Estado de cuenta · ${selected.name}`,
+          ...lines,
+          `Saldo: ${(accountBalanceCents(movements) / 100).toFixed(2)}`,
+        ].join('\n'),
+      })
+    } catch {
+      // Compartir es opcional y el sistema puede cancelarlo: no es un error del POS.
+    }
   }
 
   return (

@@ -82,8 +82,8 @@ export function AdminInventoryScreen({
   useEffect(() => {
     let live = true
 
-    void Promise.all([database.products.toArray(), database.idempotency_queue.toArray()]).then(
-      ([rows, queue]) => {
+    void Promise.all([database.products.toArray(), database.idempotency_queue.toArray()])
+      .then(([rows, queue]) => {
         if (!live) return
 
         setProducts(rows.slice().sort((left, right) => left.name.localeCompare(right.name)))
@@ -91,8 +91,11 @@ export function AdminInventoryScreen({
           queue.filter((row) => row.operation === 'stock_adjustment' && row.status === 'pending').length,
         )
         setLoaded(true)
-      },
-    )
+      })
+      .catch(() => {
+        // Sin lectura no hay semáforo: la pantalla queda en su estado sin cargar y
+        // el rechazo no se escapa sin manejar.
+      })
 
     return () => {
       live = false
