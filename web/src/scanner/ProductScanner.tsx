@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { nowMs, recordSampleInBackground } from '@/metrics/performance'
+
 /**
  * Escáner de códigos de barras como adaptador best-effort (W4-FE-3;
  * docs/DESIGN.md §1.2:138, §251-252). La cámara NUNCA bloquea la venta:
@@ -209,7 +211,13 @@ export function ProductScanner({
 
           if (armedCode !== code) {
             armedCode = code
-            props.onProductIdentified?.(code)
+            if (props.onProductIdentified) {
+              // W9-BE-1: la muestra mide lo que el servidor no puede ver, desde la detección
+              // hasta que el producto queda identificado (y su línea entra al carrito).
+              const identifiedAt = nowMs()
+              props.onProductIdentified(code)
+              recordSampleInBackground('scan', nowMs() - identifiedAt)
+            }
           }
         }
 

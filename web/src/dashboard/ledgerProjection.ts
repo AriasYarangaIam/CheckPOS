@@ -185,7 +185,7 @@ export async function readReceivable(input: {
 
   const network = input.fetchImpl ?? globalThis.fetch
 
-  let response: Response
+  let response: Response | undefined
   try {
     response = await network(`${input.baseUrl ?? ''}/fiado-accounts`, {
       method: 'GET',
@@ -194,7 +194,8 @@ export async function readReceivable(input: {
   } catch {
     return { status: 'offline' }
   }
-  if (!response.ok) return { status: 'offline' }
+  // Un fetch que no devuelve una Response —o no devuelve nada— es un camino offline.
+  if (response === undefined || !response.ok) return { status: 'offline' }
 
   let body: unknown
   try {

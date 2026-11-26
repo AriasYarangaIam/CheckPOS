@@ -59,6 +59,7 @@ import (
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/config"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/httpx"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/logging"
+	"github.com/AriasYarangaIam/CheckPOS/internal/platform/metrics"
 	"github.com/AriasYarangaIam/CheckPOS/internal/platform/postgres"
 	"github.com/AriasYarangaIam/CheckPOS/internal/synccursor"
 )
@@ -331,9 +332,13 @@ func run() error {
 		return err
 	}
 
+	// El registro de latencias del proceso (Sprint 9, W9-BE-1). Es una ruta de operación, no de
+	// negocio: `GET /metrics` se suma a /healthz y /readyz fuera de docs/BACKEND.md §4.
+	requestMetrics := metrics.NewRegistry(metrics.DefaultSampleCapacity)
+
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
-		Handler: httpx.NewRouter(logger, readiness, httpx.WithRoutes(func(mux *http.ServeMux) {
+		Handler: httpx.NewRouterWithMetrics(logger, readiness, requestMetrics, httpx.WithMetrics(requestMetrics), httpx.WithRoutes(func(mux *http.ServeMux) {
 			mux.Handle("POST /auth/login", login)
 			// Y la ruta pre-auth del dueño: contraseña maestra del tenant, sin middleware.
 			mux.Handle("POST /auth/admin-login", adminLogin)

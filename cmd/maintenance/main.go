@@ -7,6 +7,11 @@
 //	                                       run the F5 remediation of a non-empty sales_default
 //	go run ./cmd/maintenance admin-password --tenant <uuid>
 //	                                       set the tenant master password (read from stdin)
+//	go run ./cmd/maintenance backup --dir <path>
+//	                                       write a logical dump plus its JSON manifest (Sprint 9)
+//	go run ./cmd/maintenance restore-verify --file <manifest> --scratch <pos_restore_*>
+//	                                       restore the dump into a throwaway database and compare it
+//	                                       against the manifest (Sprint 9)
 //
 // The two subcommands are separate on purpose: the operator schedules each one on its own
 // and each is verifiable in isolation (decisión D4 de odd/tasks/sprint-6-offline-sync.md).
@@ -82,13 +87,17 @@ func run(ctx context.Context, args []string) error {
 		return runPartitions(ctx, logger, args[1:])
 	case "admin-password":
 		return runAdminPassword(ctx, logger, args[1:], os.Stdin, setMasterPasswordWithMigrationRole)
+	case "backup":
+		return runBackup(ctx, logger, args[1:])
+	case "restore-verify":
+		return runRestoreVerify(ctx, logger, args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 }
 
-// usage prints the two documented invocations.
+// usage prints the documented invocations.
 func usage() {
 	fmt.Fprint(os.Stderr, `usage:
   maintenance retention       delete the idempotency keys completed more than 400 days ago
@@ -99,6 +108,11 @@ func usage() {
   maintenance admin-password --tenant <uuid>
                               set the tenant master password, read from standard input
                               (never from an argument: it would stay in the shell history)
+  maintenance backup --dir <path>
+                              write a pg_dump -Fc snapshot plus its .manifest.json
+  maintenance restore-verify --file <manifest> --scratch <pos_restore_name>
+                              restore the dump into a throwaway database, compare the schema
+                              fingerprint and the row counts, and drop it again
 `)
 }
 

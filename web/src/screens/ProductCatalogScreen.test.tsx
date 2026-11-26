@@ -313,3 +313,14 @@ describe('ProductCatalogScreen', () => {
     database.close()
   })
 })
+
+describe('ProductCatalogScreen con la lectura local fallando', () => {
+  it('keeps the segment honest and never escapes the rejection', () => {
+    const database = freshDatabase()
+    database.close()
+
+    render(<ProductCatalogScreen database={database} />)
+
+    expect(screen.getByRole('heading', { name: 'Productos' })).toBeTruthy()
+  })
+})

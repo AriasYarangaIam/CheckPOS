@@ -158,6 +158,7 @@ describe('syncCatalogFromApi', () => {
       'fiado_accounts',
       'fiado_movements',
       'idempotency_queue',
+      'performance_samples',
       'products',
     ])
   })

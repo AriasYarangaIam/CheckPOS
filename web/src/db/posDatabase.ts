@@ -195,6 +195,23 @@ export interface FiadoMovementRow {
   readonly created_at: string
 }
 
+/**
+ * Muestra de desempeño del dispositivo (Sprint 9, W9-BE-1). Mide lo que el servidor no puede
+ * ver: el tiempo de escaneo a carrito y el de cada drenaje de la cola. `device_id` sale de la
+ * sesión del bind, porque el token del servidor no transporta ese dato.
+ *
+ * `duration_ms` es un entero no negativo: la muestra se redondea al escribir y nunca se
+ * guarda un valor negativo por un reloj que retrocede.
+ */
+export interface PerformanceSampleRow {
+  /** Autoincremento local: la muestra no se sincroniza con el servidor. */
+  readonly id?: number
+  readonly kind: 'scan' | 'flush'
+  readonly duration_ms: number
+  readonly device_id: string
+  readonly recorded_at: string
+}
+
 /** Nombre por defecto de la base. */
 export const POS_DATABASE_NAME = 'pos-saas'
 
@@ -207,6 +224,7 @@ export class PosDatabase extends Dexie {
   cash_closes!: Table<CashCloseRow, string>
   fiado_accounts!: Table<FiadoAccountRow, string>
   fiado_movements!: Table<FiadoMovementRow, string>
+  performance_samples!: Table<PerformanceSampleRow, number>
 
   constructor(name: string = POS_DATABASE_NAME) {
     super(name)
@@ -286,6 +304,25 @@ export class PosDatabase extends Dexie {
       cash_closes: 'closed_on, id',
       fiado_accounts: 'id, name, phone',
       fiado_movements: 'id, fiado_account_id, created_at',
+    })
+
+    /*
+     * Versión 5 (W9-BE-1): muestras de desempeño por dispositivo. `kind` separa las dos
+     * mediciones y `recorded_at` ordena la exportación de la bitácora del piloto; el índice
+     * de `kind` evita leer todas las muestras para calcular cada percentil.
+     *
+     * Las siete tiendas anteriores se repiten idénticas, con la convención de las versiones
+     * 1 a 4: el esquema completo se lee en cada versión.
+     */
+    this.version(5).stores({
+      products: 'id, gtin, name, category',
+      cart: 'id, product_id',
+      idempotency_queue: 'id, key, status, created_at',
+      device_session: 'id',
+      cash_closes: 'closed_on, id',
+      fiado_accounts: 'id, name, phone',
+      fiado_movements: 'id, fiado_account_id, created_at',
+      performance_samples: '++id, kind, recorded_at',
     })
   }
 }

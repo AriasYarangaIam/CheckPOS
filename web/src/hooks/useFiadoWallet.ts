@@ -27,9 +27,14 @@ export function useFiadoWallet(database: PosDatabase = getPosDatabase()): {
   useEffect(() => {
     let live = true
 
-    void readFiadoWallet(database).then((read) => {
-      if (live) setWallet(read)
-    })
+    void readFiadoWallet(database)
+      .then((read) => {
+        if (live) setWallet(read)
+      })
+      .catch(() => {
+        // Sin IndexedDB la cartera queda en su estado inicial honesto (sin cuentas
+        // ni movimientos): una lectura fallida no puede escaper sin manejar.
+      })
 
     return () => {
       live = false

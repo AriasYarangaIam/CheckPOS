@@ -1,5 +1,6 @@
 import { getPosDatabase, type IdempotencyQueueRow, type PosDatabase, type QueueOperation } from '@/db/posDatabase'
 import { markSaleQueueStatus } from '@/sales/saleQueue'
+import { nowMs, recordSampleInBackground } from '@/metrics/performance'
 
 /**
  * Motor de sincronización del cliente (W6-FE-3; SPRINTS.md Semana 6; ARCHITECTURE.md:91;
@@ -174,6 +175,14 @@ export async function drainQueue(deps: DrainDeps = {}): Promise<DrainSummary> {
     const rows = await database.idempotency_queue.toArray()
     const batch = nextBatch(rows)
 
+    // W9-BE-1: el drenaje es del cliente; se mide desde que arranca el lote hasta su ack. Un
+    // lote vacío no es una medición y no se registra.
+    const flushStartedAt = nowMs()
+    const finish = (summary: DrainSummary): DrainSummary => {
+      if (batch.length > 0) recordSampleInBackground('flush', nowMs() - flushStartedAt)
+      return summary
+    }
+
     let acknowledged = 0
     let rejected = 0
 
@@ -196,20 +205,20 @@ export async function drainQueue(deps: DrainDeps = {}): Promise<DrainSummary> {
         case 'in-flight':
           // Branch C: el servidor pidió esperar. Se corta el drenaje entero —no tiene
           // sentido seguir con el lote— y la fila sigue `pending`.
-          return {
+          return finish({
             acknowledged,
             rejected,
             retryAfterMs: outcome.retryAfterMs ?? undefined,
             shouldRetry: true,
-          }
+          })
 
         case 'unconfirmed':
           // Red caída o 5xx: nada se pierde y no hay nada que mostrar.
-          return { acknowledged, rejected, shouldRetry: true }
+          return finish({ acknowledged, rejected, shouldRetry: true })
       }
     }
 
-    return { acknowledged, rejected, shouldRetry: false }
+    return finish({ acknowledged, rejected, shouldRetry: false })
   } finally {
     draining = false
   }

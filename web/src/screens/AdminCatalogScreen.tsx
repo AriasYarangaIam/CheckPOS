@@ -91,12 +91,17 @@ export function AdminCatalogScreen({
   useEffect(() => {
     let live = true
 
-    void database.products.toArray().then((rows) => {
-      if (!live) return
+    void database.products.toArray()
+      .then((rows) => {
+        if (!live) return
 
-      setProducts(rows.slice().sort((left, right) => left.name.localeCompare(right.name)))
-      setLoaded(true)
-    })
+        setProducts(rows.slice().sort((left, right) => left.name.localeCompare(right.name)))
+        setLoaded(true)
+      })
+      .catch(() => {
+        // Sin IndexedDB la tabla sigue en su estado sin cargar: el encabezado
+        // permanece y ningún rechazo queda sin manejar.
+      })
 
     return () => {
       live = false
@@ -107,9 +112,13 @@ export function AdminCatalogScreen({
   const canSaveOnline = isOnline && token !== undefined && token.trim() !== ''
 
   function reload(): void {
-    void database.products.toArray().then((rows) => {
-      setProducts(rows.slice().sort((left, right) => left.name.localeCompare(right.name)))
-    })
+    void database.products.toArray()
+      .then((rows) => {
+        setProducts(rows.slice().sort((left, right) => left.name.localeCompare(right.name)))
+      })
+      .catch(() => {
+        // La recarga fallida conserva la lista ya mostrada, sin escalar el error.
+      })
   }
 
   async function adopt(): Promise<void> {
