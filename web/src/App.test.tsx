@@ -22,6 +22,7 @@ function setOnLine(value: boolean): void {
 
 afterEach(() => {
   Reflect.deleteProperty(window.navigator, 'onLine')
+  sessionStorage.clear()
   vi.unstubAllGlobals()
 })
 
@@ -32,6 +33,18 @@ async function waitForNumpad(): Promise<HTMLButtonElement> {
   })
 
   return screen.getByRole('button', { name: '1' }) as HTMLButtonElement
+}
+
+/** Entra por la puerta del empleado: el rol y después el PIN. */
+function chooseEmployee(): void {
+  fireEvent.click(screen.getByTestId('role-card-employee'))
+  fireEvent.click(screen.getByTestId('role-continue'))
+}
+
+/** Entra por la puerta del administrador hasta la pantalla de credencial. */
+function chooseAdmin(): void {
+  fireEvent.click(screen.getByTestId('role-card-admin'))
+  fireEvent.click(screen.getByTestId('role-continue'))
 }
 
 describe('App shell', () => {
@@ -47,15 +60,27 @@ describe('App shell', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('POS SaaS')
   })
 
-  it('opens on the employee access screen', () => {
+  it('opens on the role selector, with no credential and no tenant data', () => {
     render(<App />)
 
-    // Sin datos de tenant antes de autenticar (docs/DESIGN.md:104-106;
-    // docs/FRONTEND.md:47): el shell es el wordmark del producto y la pantalla
-    // de PIN, nada más.
+    // W8-FE-1: la primera pantalla es la puerta del rol (docs/FRONTEND.md:46;
+    // docs/DESIGN.md:492), y antes de autenticar no hay ni un dato del local.
+    expect(screen.getByTestId('role-selector')).toBeTruthy()
+    expect(screen.getByTestId('role-card-employee')).toBeTruthy()
+    expect(screen.getByTestId('role-card-admin')).toBeTruthy()
+    expect(screen.queryByLabelText(/teléfono/i)).toBeNull()
+    expect(screen.queryByText(/bodega/i)).toBeNull()
+    // El wordmark y el estado de la conexión son los del shell, presentes también acá.
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('POS SaaS')
+  })
+
+  it('reaches the employee PIN screen from the role selector', () => {
+    render(<App />)
+
+    chooseEmployee()
+
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Acceso del empleado')
     expect(screen.getByText('PIN')).toBeTruthy()
-    expect(screen.getAllByRole('button')).toHaveLength(12)
   })
 
   it('asks the server for nothing before authentication', () => {
@@ -92,6 +117,7 @@ describe('App shell', () => {
      */
     setOnLine(true)
     render(<App />)
+    chooseEmployee()
 
     await waitForNumpad()
 
@@ -133,6 +159,7 @@ describe('App shell', () => {
   it('comes back to En línea when the connection returns', async () => {
     setOnLine(false)
     render(<App />)
+    chooseEmployee()
 
     expect(screen.getByText('Modo Offline - IndexedDB')).toBeTruthy()
 
@@ -165,6 +192,7 @@ describe('App shell', () => {
 
     try {
       render(<App />)
+      chooseEmployee()
       await waitForNumpad()
 
       fireEvent.click(screen.getByRole('button', { name: '1' }))
@@ -180,11 +208,71 @@ describe('App shell', () => {
 
   it('never offers the navigation menu before the device PIN unlocks', () => {
     render(<App />)
+    chooseEmployee()
 
     // El menú es de la operación, no del acceso: la pantalla de PIN sigue
     // siendo la puerta y no hay panel que abrir antes de desbloquear.
     expect(screen.queryByTestId('open-navigation')).toBeNull()
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('opens the admin credential screen from the role selector', () => {
+    render(<App />)
+
+    chooseAdmin()
+
+    expect(screen.getByTestId('admin-credential')).toBeTruthy()
+    expect(screen.getByLabelText('Teléfono')).toBeTruthy()
+    expect(screen.getByLabelText('Contraseña maestra')).toBeTruthy()
+  })
+
+  it('reaches the admin shell after a successful login and stores the token for the tab', async () => {
+    const fetchSpy = vi.fn(async (_url: string | URL, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({ token: 'jwt-de-prueba', tenant: { name: 'Bodega Doña Rosa' } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    try {
+      render(<App />)
+      chooseAdmin()
+
+      fireEvent.change(screen.getByTestId('admin-phone'), { target: { value: '+51988000111' } })
+      fireEvent.change(screen.getByTestId('admin-password'), { target: { value: 'clave-maestra' } })
+      fireEvent.click(screen.getByTestId('admin-submit'))
+
+      // El shell del administrador sustituye la cabecera del empleado: su marca es el tenant.
+      expect(await screen.findByTestId('admin-brand')).toBeTruthy()
+      expect(screen.getByTestId('admin-brand').textContent).toContain('Bodega Doña Rosa')
+      expect(screen.getByRole('navigation', { name: 'Módulos de administración' })).toBeTruthy()
+      expect(sessionStorage.getItem('pos-admin-session')).not.toBeNull()
+
+      // Y el cierre de sesión vuelve al selector de rol, sin llamar a ningún endpoint.
+      fireEvent.click(screen.getByTestId('admin-logout'))
+      expect(await screen.findByTestId('role-selector')).toBeTruthy()
+      expect(sessionStorage.getItem('pos-admin-session')).toBeNull()
+    } finally {
+      sessionStorage.clear()
+    }
+  })
+
+  it('resumes the admin shell on a reload, because the session lives in the tab', () => {
+    sessionStorage.setItem(
+      'pos-admin-session',
+      JSON.stringify({ token: 'jwt-guardado', tenantName: 'Bodega Doña Rosa', phone: '+51988000111' }),
+    )
+
+    try {
+      render(<App />)
+
+      expect(screen.getByTestId('admin-brand').textContent).toContain('Bodega Doña Rosa')
+      // No vuelve a pedir la credencial: la sesión de la pestaña alcanza.
+      expect(screen.queryByTestId('admin-credential')).toBeNull()
+    } finally {
+      sessionStorage.clear()
+    }
   })
 
   it('opens the navigation sheet and switches the surface to the cash close and back', async () => {
@@ -204,6 +292,7 @@ describe('App shell', () => {
 
     try {
       render(<App />)
+      chooseEmployee()
       await waitForNumpad()
 
       for (const digit of '2468') {

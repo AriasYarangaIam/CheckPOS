@@ -41,10 +41,14 @@ export const JITTER_RATIO = 0.3
  * cierre de caja al final, sobre el ledger ya confirmado.
  */
 const OPERATION_ORDER: Readonly<Record<QueueOperation, number>> = {
-  sale: 0,
-  void: 1,
-  fiado_movement: 2,
-  cash_close: 3,
+  // §7.8: el catálogo antes que el ledger. Un producto creado en el mismo drenaje tiene que
+  // existir antes que la venta que lo referencia, o el servidor rechazaría la línea.
+  product: 0,
+  sale: 1,
+  void: 2,
+  fiado_movement: 3,
+  cash_close: 4,
+  stock_adjustment: 5,
 }
 
 /**
@@ -92,6 +96,12 @@ export function endpointFor(row: IdempotencyQueueRow): string {
       return '/fiado-movements'
     case 'cash_close':
       return '/cash-closes'
+    case 'stock_adjustment':
+      // La merma es el sexto POST encolable: mueve stock, no dinero, así que drena al final.
+      return '/stock-adjustments'
+    case 'product':
+      // El alta de producto drena primero: catálogo antes que ledger (§7.8).
+      return '/products'
   }
 }
 

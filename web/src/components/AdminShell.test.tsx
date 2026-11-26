@@ -1,0 +1,247 @@
+// Debe ser la primera importación: el shell monta pantallas que leen IndexedDB.
+import 'fake-indexeddb/auto'
+
+import Dexie from 'dexie'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { ADMIN_SESSION_KEY, readAdminSession, saveAdminSession } from '@/auth/accessSession'
+import { AdminShell } from '@/components/AdminShell'
+import { POS_DATABASE_NAME, PosDatabase } from '@/db/posDatabase'
+import { formatBusinessDate } from '@/sales/saleClose'
+
+/*
+ * Shell del rol Administrador (W8-FE-2; docs/FRONTEND.md:48; docs/DESIGN.md:318, :340, :573-645).
+ *
+ * Lo que se fija: los SEIS destinos del diseño con sus etiquetas y en su orden, el bloque de
+ * marca con el nombre del tenant, el badge de rol, el footer de sesión con el teléfono y el
+ * cierre de sesión del lado del cliente —sin endpoint, porque el contrato no tiene uno—, y que
+ * un destino sin módulo todavía muestre un estado honesto en vez de inventar una pantalla.
+ */
+
+const createdNames = new Set<string>()
+let nextSuffix = 0
+
+function freshDatabase(): PosDatabase {
+  nextSuffix += 1
+  const name = `${POS_DATABASE_NAME}-admin-shell-test-${nextSuffix}`
+  createdNames.add(name)
+
+  return new PosDatabase(name)
+}
+
+afterEach(async () => {
+  sessionStorage.clear()
+  await Promise.all([...createdNames].map((name) => Dexie.delete(name)))
+  createdNames.clear()
+  vi.unstubAllGlobals()
+})
+
+const SESSION = {
+  token: 'jwt-del-dueno',
+  tenantName: 'Bodega Doña Rosa',
+  phone: '+51988000111',
+} as const
+
+/** Monta el shell con una base propia y un cierre de sesión espiado. */
+function renderShell(overrides: { onLogout?: () => void; initialDestination?: string } = {}) {
+  const database = freshDatabase()
+  const onLogout = overrides.onLogout ?? (() => undefined)
+
+  const result = render(
+    <AdminShell
+      database={database}
+      onLogout={onLogout}
+      session={SESSION}
+      initialDestination={overrides.initialDestination as never}
+    />,
+  )
+
+  return { ...result, database, onLogout }
+}
+
+describe('AdminShell', () => {
+  it('navigates the six destinations of the design, with their labels', () => {
+    const { database } = renderShell()
+
+    const nav = screen.getByRole('navigation', { name: 'Módulos de administración' })
+    const labels = within(nav)
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('data-label'))
+
+    expect(labels).toEqual([
+      'Dashboard / Auditoría',
+      'Cierre de caja',
+      'Cuentas y Fiados',
+      'Inventario / Stock Rápido',
+      'Mermas y Daños',
+      'Catálogo Maestro',
+    ])
+    // `Ajustes de dispositivos` queda fuera a propósito (delta D3).
+    expect(screen.queryByText(/ajustes de dispositivos/i)).toBeNull()
+
+    database.close()
+  })
+
+  it('shows the tenant name as the brand and the admin role badge', () => {
+    const { database } = renderShell()
+
+    const brand = screen.getByTestId('admin-brand')
+    expect(brand.textContent).toContain('Bodega Doña Rosa')
+    expect(screen.getByTestId('admin-role-badge').textContent).toContain('Administrador')
+
+    database.close()
+  })
+
+  it('closes the session on the client, without calling any endpoint', async () => {
+    const onLogout = vi.fn()
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+
+    // Una sesión guardada al montar, para probar que el cierre la borra de verdad.
+    saveAdminSession(SESSION)
+    const { database } = renderShell({ onLogout })
+
+    const footer = screen.getByTestId('admin-session-footer')
+    expect(footer.textContent).toContain(SESSION.phone)
+
+    // El dashboard lee la deuda viva al montar; lo que el contrato prohíbe es que el CIERRE DE
+    // SESIÓN llame al servidor: no existe endpoint de logout (`ARCHITECTURE.md:122-135`).
+    await waitFor(() => expect(screen.getByTestId('dashboard-receivable')).toBeTruthy())
+    const callsBeforeLogout = fetchSpy.mock.calls.length
+
+    fireEvent.click(screen.getByTestId('admin-logout'))
+
+    expect(onLogout).toHaveBeenCalled()
+    expect(sessionStorage.getItem(ADMIN_SESSION_KEY)).toBeNull()
+    expect(readAdminSession()).toBeNull()
+    expect(fetchSpy.mock.calls.length).toBe(callsBeforeLogout)
+
+    database.close()
+  })
+
+  it('opens on the dashboard, which reads the local ledger', () => {
+    const { database } = renderShell()
+
+    // El destino por defecto del diseño es Dashboard / Auditoría y su módulo ya existe: la
+    // pantalla muestra sus KPIs, alimentadas por la proyección local.
+    expect(screen.getByTestId('dashboard-net-sales')).toBeTruthy()
+
+    database.close()
+  })
+
+  it('renders the module that already exists when its destination is chosen', async () => {
+    const { database } = renderShell()
+
+    // El módulo se busca DENTRO del panel de contenido: la etiqueta del destino repite el nombre.
+    fireEvent.click(screen.getByTestId('admin-destination-cash-close'))
+    expect(
+      await within(screen.getByRole('main')).findByRole('heading', { name: 'Cierre de caja' }),
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('admin-destination-accounts'))
+    expect(
+      await within(screen.getByRole('main')).findByRole('heading', { name: 'Cuentas y Fiados' }),
+    ).toBeTruthy()
+
+    database.close()
+  })
+
+  it('marks the active destination and keeps navigation available offline', async () => {
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => false })
+    const { database } = renderShell()
+
+    try {
+      const dashboard = screen.getByTestId('admin-destination-dashboard')
+      expect(dashboard.getAttribute('aria-current')).toBe('page')
+
+      fireEvent.click(screen.getByTestId('admin-destination-cash-close'))
+
+      // Con la red caída la navegación NO se bloquea (offline-first, `docs/DESIGN.md:643`).
+      expect(
+        await within(screen.getByRole('main')).findByRole('heading', { name: 'Cierre de caja' }),
+      ).toBeTruthy()
+      expect(screen.getByTestId('admin-destination-cash-close').getAttribute('aria-current')).toBe('page')
+      expect(screen.getByText('Modo Offline - IndexedDB')).toBeTruthy()
+    } finally {
+      Reflect.deleteProperty(window.navigator, 'onLine')
+      database.close()
+    }
+  })
+
+  it('renders the admin cash close with its six rows and the session token', async () => {
+    const database = freshDatabase()
+    render(
+      <AdminShell database={database} onLogout={() => undefined} session={SESSION} />,
+    )
+
+    fireEvent.click(screen.getByTestId('admin-destination-cash-close'))
+
+    // W8-FE-4: las seis filas del CHECK en el arqueo del rol Admin.
+    await waitFor(() =>
+      expect(screen.getAllByTestId(/^cash-close-row-/)).toHaveLength(6),
+    )
+    expect(screen.getByTestId('cash-close-row-fiado')).toBeTruthy()
+
+    // El dueño tiene sesión: el cierre puede pedir el acuse del servidor, así que el aviso de
+    // «sin sesión en línea» no aparece y el CTA queda habilitado.
+    expect(screen.queryByTestId('cash-close-no-session')).toBeNull()
+    expect((screen.getByTestId('cash-close-submit') as HTMLButtonElement).disabled).toBe(false)
+
+    database.close()
+  })
+
+  it('cannot send a close that already exists for the day', async () => {
+    const database = freshDatabase()
+    const today = formatBusinessDate(new Date())
+    await database.cash_closes.put({
+      id: `close-${today}`,
+      closed_on: today,
+      created_at: new Date().toISOString(),
+      counts: JSON.stringify(
+        ['cash', 'yape', 'plin', 'card', 'other', 'fiado'].map((method) => ({
+          payment_method: method,
+          expected_cents: 0,
+          counted_cents: 0,
+          difference_cents: method === 'fiado' ? null : 0,
+        })),
+      ),
+      acknowledged: false,
+    })
+
+    render(<AdminShell database={database} onLogout={() => undefined} session={SESSION} />)
+    fireEvent.click(screen.getByTestId('admin-destination-cash-close'))
+
+    // F37: un cierre ya existente de la fecha abre en solo lectura y no se puede reenviar.
+    expect(await screen.findByTestId('cash-close-readonly')).toBeTruthy()
+    expect(screen.queryByTestId('cash-close-submit')).toBeNull()
+
+    database.close()
+  })
+
+  it('hands the session token to the fiado wallet so it can restore from the server', async () => {
+    const fetchSpy = vi.fn(async (_url: string | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ accounts: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+    const database = freshDatabase()
+
+    render(
+      <AdminShell
+        database={database}
+        fetchImpl={fetchSpy as unknown as typeof fetch}
+        onLogout={() => undefined}
+        session={SESSION}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('admin-destination-accounts'))
+    fireEvent.click(await screen.findByTestId('fiado-restore'))
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled())
+    const [url, init] = (fetchSpy.mock.calls[0] ?? []) as [string, RequestInit | undefined]
+    expect(url).toBe('/fiado-accounts')
+    expect((init?.headers as Record<string, string>).authorization).toBe(`Bearer ${SESSION.token}`)
+
+    database.close()
+  })
+})

@@ -14,6 +14,8 @@
 //	GET  /healthz      sondeo de vida: 200 sin consultar ninguna dependencia
 //	GET  /readyz       sondeo de preparación: 200 si los dos pools responden, 503 si no
 //	POST /auth/login   ruta pre-auth: 200 con el access token de empleado, 401 genérico
+//	POST /auth/admin-login  ruta pre-auth del dueño: 200 con el token y el nombre del tenant,
+//	                       401 genérico constante (Sprint 8, W8-BE-1)
 //	POST /auth/device-bind  ruta autenticada: 200 con el dispositivo y su ventana offline,
 //	                        401 si el access token falta o no verifica
 //	GET  /products          rutas autenticadas del catálogo por tenant (Sprint 3, W3-BE-1)
@@ -29,6 +31,8 @@
 //	                        (Sprint 7, W7-BE-1/W7-BE-3, docs/BACKEND.md §4.12)
 //	POST /fiado-movements   cargo o abono firmado con upsert atómico del deudor dentro de la
 //	                        transacción del claim (Sprint 7, W7-BE-2, §4.11)
+//	POST /stock-adjustments merma con delta negativo y motivo exacto sobre el log del stock
+//	                        (Sprint 8, W8-BE-2, §4.14)
 //
 // SIGINT y SIGTERM disparan un apagado ordenado: el servidor deja de aceptar conexiones
 // y espera las peticiones en vuelo antes de cerrar los pools.
@@ -201,6 +205,20 @@ func run() error {
 		return err
 	}
 
+	// El login de administrador (Sprint 8, W8-BE-1) es la SEGUNDA credencial del proceso: la
+	// misma lectura pre-auth resuelve el teléfono, y lo que se verifica es la contraseña maestra
+	// del tenant con el rol `pos_auth` —cuya concesión es por columna—. El token lleva el claim
+	// `role:"admin"`, el único marcador administrativo del contrato (docs/BACKEND.md §4.4).
+	adminLogin, err := identity.NewAdminLoginHandler(
+		identity.NewPostgresUserDirectory(authPool),
+		identity.NewPostgresTenantDirectory(authPool),
+		issuer,
+		logger,
+	)
+	if err != nil {
+		return err
+	}
+
 	// El pool de datos entra al helper de transacción de tenant, que es la disciplina de TIPOS
 	// de la ruta de datos de negocio: `TenantPool` no ofrece ninguna forma de consultar sin
 	// contexto (internal/platform/postgres/tenant.go), y `POST /auth/device-bind` es su primer
@@ -290,6 +308,16 @@ func run() error {
 		return err
 	}
 
+	// El registro de merma (Sprint 8, W8-BE-2): un delta firmado negativo sobre el log del stock,
+	// con `source = 'manual'` y uno de los tres motivos exactos. Corre sobre el pool de negocio
+	// porque la tabla es del módulo Catalog y el RLS decide qué producto existe para el tenant
+	// (docs/BACKEND.md §4.14; docs/DATABASE.md §4 `stock_adjustments`).
+	stockAdjustments, err := catalog.NewStockAdjustmentHandler(
+		catalog.NewPostgresStockAdjustmentStore(postgres.NewTenantPool(pool)), logger)
+	if err != nil {
+		return err
+	}
+
 	// El almacenamiento de objetos de las fotos (Sprint 3, W3-BE-3, docs/BACKEND.md §10.3):
 	// el store local es la caja fuerte del contrato y el handler NO toca la base —la URL
 	// que devuelve es la única pieza que el cliente mandará después en photo_url.
@@ -307,6 +335,8 @@ func run() error {
 		Addr: cfg.HTTPAddr,
 		Handler: httpx.NewRouter(logger, readiness, httpx.WithRoutes(func(mux *http.ServeMux) {
 			mux.Handle("POST /auth/login", login)
+			// Y la ruta pre-auth del dueño: contraseña maestra del tenant, sin middleware.
+			mux.Handle("POST /auth/admin-login", adminLogin)
 			// El middleware de token es el único camino por el que este handler se entera de su
 			// tenant: leerlo del cuerpo o de un encabezado no existe en el contrato
 			// (ARCHITECTURE.md:23).
@@ -338,6 +368,9 @@ func run() error {
 			// claims del token, y el saldo que viaja es el computado, nunca una columna
 			// (docs/BACKEND.md §4.11, §4.12).
 			mux.Handle("GET /fiado-accounts", identity.RequireAccessToken(issuer, fiadoAccounts))
+			// La merma del rol Admin: delta negativo, motivo exacto y stock aditivo (Sprint 8,
+			// W8-BE-2, docs/BACKEND.md §4.14). Uno de los seis POST encolables.
+			mux.Handle("POST /stock-adjustments", identity.RequireAccessToken(issuer, stockAdjustments))
 			mux.Handle("POST /fiado-movements", identity.RequireAccessToken(issuer, fiadoMovements))
 		})),
 		ReadHeaderTimeout: 5 * time.Second,

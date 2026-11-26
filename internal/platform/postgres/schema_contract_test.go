@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -182,6 +183,43 @@ FROM sales s
 JOIN pg_class c ON c.oid = s.tableoid
 WHERE s.sale_id = $1`
 
+// paymentMethodConstraintsSQL lee la definición de los DOS CHECK de payment_method: el de `sales`
+// y el de `cash_close_counts`.
+// El join con `pg_class` limita el resultado a las DOS tablas del contrato: cada partición de
+// `sales` clona la restricción del padre con el mismo nombre, así que filtrar solo por `conname`
+// devolvería una fila por partición.
+const paymentMethodConstraintsSQL = `
+SELECT pg_get_constraintdef(c.oid)
+  FROM pg_constraint c
+  JOIN pg_class t ON t.oid = c.conrelid
+ WHERE c.conname IN ('sales_payment_method_chk', 'cash_close_counts_payment_method_chk')
+   AND t.relname IN ('sales', 'cash_close_counts')
+ ORDER BY t.relname`
+
+// paymentMethodValues extrae cada valor citado de una definición de CHECK.
+var paymentMethodValues = regexp.MustCompile(`'([a-z]+)'::text`)
+
+// globalTenantColumnSQL cuenta columnas `tenant_id` en las tablas globales.
+const globalTenantColumnSQL = `
+SELECT count(*)
+  FROM information_schema.columns
+ WHERE table_schema = 'public'
+   AND table_name IN ('global_products', 'global_barcodes')
+   AND column_name = 'tenant_id'`
+
+// globalPoliciesSQL cuenta políticas sobre las tablas globales.
+const globalPoliciesSQL = `
+SELECT count(*)
+  FROM pg_policies
+ WHERE tablename IN ('global_products', 'global_barcodes')`
+
+// globalRlsEnabledSQL cuenta tablas globales con RLS habilitado.
+const globalRlsEnabledSQL = `
+SELECT count(*)
+  FROM pg_class
+ WHERE relname IN ('global_products', 'global_barcodes')
+   AND relrowsecurity`
+
 func TestSchemaContract(t *testing.T) {
 	if testing.Short() {
 		t.Skip("prueba de integración: necesita el contenedor local de PostgreSQL (docker compose up -d); se salta con -short (SPRINTS.md §8)")
@@ -291,6 +329,42 @@ func TestSchemaContract(t *testing.T) {
 		slices.Sort(got)
 		if !slices.Equal(got, quantityColumns) {
 			t.Errorf("las columnas exactas no enteras difieren:\n got: %v\nwant: %v (solo cantidades NUMERIC(10,3); ninguna puede ser dinero)", got, quantityColumns)
+		}
+	})
+
+	t.Run("payment_method carries the same six values on both tables", func(t *testing.T) {
+		// W8-DB-2: el sexto valor `fiado` (D11) está en `sales` Y en `cash_close_counts`, con el
+		// MISMO conjunto. Un CHECK que se quedara en cinco valores rompería el cierre de caja del
+		// día en que hubo fiado.
+		got := queryStrings(t, db, paymentMethodConstraintsSQL)
+		if len(got) != 2 {
+			t.Fatalf("definiciones de payment_method = %d, want 2 (sales y cash_close_counts): %v", len(got), got)
+		}
+
+		want := "cash, yape, plin, card, other, fiado"
+		for _, definition := range got {
+			values := paymentMethodValues.FindAllStringSubmatch(definition, -1)
+			collected := make([]string, 0, len(values))
+			for _, value := range values {
+				collected = append(collected, value[1])
+			}
+			if joined := strings.Join(collected, ", "); joined != want {
+				t.Errorf("payment_method CHECK = %q, want %q (seis valores exactos)", joined, want)
+			}
+		}
+	})
+
+	t.Run("the global tables carry no tenant column and no tenant policy", func(t *testing.T) {
+		// W8-DB-2: el catálogo global es de la plataforma, no de un tenant. Ni columna
+		// `tenant_id`, ni RLS, ni política: el acceso lo media la API con pos_platform (§5.6).
+		if got := queryCount(t, db, globalTenantColumnSQL); got != 0 {
+			t.Errorf("columnas tenant_id en las tablas globales = %d, want 0", got)
+		}
+		if got := queryCount(t, db, globalPoliciesSQL); got != 0 {
+			t.Errorf("políticas sobre las tablas globales = %d, want 0", got)
+		}
+		if got := queryCount(t, db, globalRlsEnabledSQL); got != 0 {
+			t.Errorf("tablas globales con RLS habilitado = %d, want 0", got)
 		}
 	})
 

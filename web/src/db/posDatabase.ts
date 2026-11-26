@@ -76,7 +76,7 @@ export type QueueStatus = 'pending' | 'in_flight' | 'completed' | 'failed'
  * tiene el camino de la anulación (`POST /sales/{id}/void`, sin superficie de
  * UI todavía).
  */
-export type QueueOperation = 'sale' | 'void' | 'fiado_movement' | 'cash_close'
+export type QueueOperation = 'product' | 'sale' | 'void' | 'fiado_movement' | 'cash_close' | 'stock_adjustment'
 
 /**
  * Evento pendiente de sincronizar, con la clave de idempotencia que lo cubre.
