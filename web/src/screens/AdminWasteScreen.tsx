@@ -60,12 +60,17 @@ export function AdminWasteScreen({
   useEffect(() => {
     let live = true
 
-    void database.products.toArray().then((rows) => {
-      if (!live) return
+    void database.products.toArray()
+      .then((rows) => {
+        if (!live) return
 
-      setProducts(rows.slice().sort((left, right) => left.name.localeCompare(right.name)))
-      setLoaded(true)
-    })
+        setProducts(rows.slice().sort((left, right) => left.name.localeCompare(right.name)))
+        setLoaded(true)
+      })
+      .catch(() => {
+        // Sin productos leídos no hay selector de merma: la pantalla conserva su
+        // estado sin cargar y la lectura fallida queda absorbida.
+      })
 
     return () => {
       live = false

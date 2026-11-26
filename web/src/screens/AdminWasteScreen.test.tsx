@@ -236,3 +236,14 @@ describe('AdminWasteScreen', () => {
     }
   })
 })
+
+describe('AdminWasteScreen con la lectura local fallando', () => {
+  it('keeps the section honest and never escapes the rejection', () => {
+    const database = freshDatabase()
+    database.close()
+
+    render(<AdminWasteScreen database={database} />)
+
+    expect(screen.getByRole('heading', { name: 'Mermas y Daños' })).toBeTruthy()
+  })
+})

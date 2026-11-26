@@ -231,3 +231,14 @@ describe('lookupGlobalProduct', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
+
+describe('AdminCatalogScreen con la lectura local fallando', () => {
+  it('keeps the section honest and never escapes the rejection', () => {
+    const database = freshDatabase()
+    database.close()
+
+    render(<AdminCatalogScreen database={database} />)
+
+    expect(screen.getByRole('heading', { name: 'Catálogo Maestro' })).toBeTruthy()
+  })
+})

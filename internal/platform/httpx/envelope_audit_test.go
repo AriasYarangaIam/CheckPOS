@@ -128,7 +128,7 @@ func TestEveryMountedRouteGoesThroughTheRouter(t *testing.T) {
 	}
 
 	main := string(contents)
-	if !strings.Contains(main, "httpx.NewRouter(") {
+	if !strings.Contains(main, "httpx.NewRouter(") && !strings.Contains(main, "httpx.NewRouterWithMetrics(") {
 		t.Fatal("cmd/api/main.go no monta el router de httpx")
 	}
 	if strings.Contains(main, "http.NewServeMux()") {

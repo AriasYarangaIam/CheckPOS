@@ -270,4 +270,32 @@ describe('AdminDashboardScreen', () => {
       database.close()
     }
   })
+
+  it('mounts the device performance card next to the owner numbers', async () => {
+    const database = freshDatabase()
+
+    try {
+      renderDashboard(database)
+
+      expect(await screen.findByText('Desempeño del dispositivo')).toBeTruthy()
+      // La lectura de muestras tiene que resolverse antes de cerrar la base: cerrarla en vuelo
+      // rechaza la operación pendiente de Dexie como un DatabaseClosedError no controlado.
+      expect(await screen.findByTestId('performance-empty')).toBeTruthy()
+    } finally {
+      database.close()
+    }
+  })
+})
+
+describe('AdminDashboardScreen con la lectura local fallando', () => {
+  it('keeps the KPIs unread and never escapes the rejection', () => {
+    const database = freshDatabase()
+    database.close()
+
+    render(<AdminDashboardScreen database={database} token="jwt" now={() => new Date(2026, 9, 26, 20, 0, 0)} />)
+
+    expect(screen.getByRole('heading', { name: 'Dashboard / Auditoría' })).toBeTruthy()
+    // Sin lectura no hay números: los KPIs quedan en el guion honesto, no en un cero.
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
 })

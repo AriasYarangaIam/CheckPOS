@@ -65,9 +65,14 @@ export function ProductCatalogScreen({
   useEffect(() => {
     mounted.current = true
 
-    void database.products.toArray().then((rows) => {
-      if (mounted.current) setProducts(rows)
-    })
+    void database.products.toArray()
+      .then((rows) => {
+        if (mounted.current) setProducts(rows)
+      })
+      .catch(() => {
+        // `undefined` sigue significando «la base todavía no respondió»: el segmento
+        // muestra su estado honesto y la lectura fallida queda absorbida.
+      })
 
     return () => {
       mounted.current = false

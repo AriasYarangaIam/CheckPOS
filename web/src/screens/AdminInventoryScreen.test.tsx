@@ -190,3 +190,14 @@ describe('AdminInventoryScreen', () => {
     }
   })
 })
+
+describe('AdminInventoryScreen con la lectura local fallando', () => {
+  it('keeps the section honest and never escapes the rejection', () => {
+    const database = freshDatabase()
+    database.close()
+
+    render(<AdminInventoryScreen database={database} />)
+
+    expect(screen.getByRole('heading', { name: 'Inventario / Stock Rápido' })).toBeTruthy()
+  })
+})
